@@ -1,0 +1,19 @@
+{"ts":"2026-11-05T14:22:00.000Z","type":"architect_start"}
+{"ts":"2026-11-05T14:22:01.037Z","type":"architect_complete"}
+{"type":"plan_ready","stories":3}
+{"project":"todo-api","protocol":3,"runner":"ci-runner-1","stories":[{"depends_on":[],"id":"S1","title":"Add Todo model"},{"depends_on":["S1"],"id":"S2","title":"Add REST endpoints"},{"depends_on":["S1"],"id":"S3","title":"Add model tests"}],"ts":"2026-11-05T14:22:03.111Z","type":"init"}
+{"gates":[{"enforced_by":"src/verification/verify.ts","id":"build-before-commit","summary":"The project must build before a commit is accepted."}],"ts":"2026-11-05T14:22:04.148Z","type":"gates"}
+{"levels":[[{"id":"S1"}],[{"id":"S2"},{"id":"S3"}]],"ts":"2026-11-05T14:22:05.185Z","type":"dag"}
+{"ordinal":0,"story_ids":["S1"],"ts":"2026-11-05T14:22:06.222Z","type":"level_started"}
+{"id":"S1","title":"S1","ts":"2026-11-05T14:22:07.259Z","type":"story_start"}
+{"id":"S1","line":"Creating src/models/todo.ts","ts":"2026-11-05T14:22:08.296Z","type":"story_log"}
+{"id":"S1","kind":"file_change","op":"create","path":"src/models/todo.ts","text":"src/models/todo.ts","ts":"2026-11-05T14:22:09.333Z","type":"activity"}
+{"duration_secs":41,"files_created":1,"files_modified":0,"id":"S1","ts":"2026-11-05T14:22:10.370Z","type":"story_complete"}
+{"completed":1,"percentage":33,"total":3,"ts":"2026-11-05T14:22:11.407Z","type":"progress"}
+{"id":"S2","title":"S2","ts":"2026-11-05T14:22:12.444Z","type":"story_start"}
+{"id":"S3","title":"S3","ts":"2026-11-05T14:22:13.481Z","type":"story_start"}
+{"id":"S3","kind":"test","ok":true,"text":"npm test","ts":"2026-11-05T14:22:14.518Z","type":"activity"}
+{"duration_secs":58,"files_created":1,"files_modified":0,"id":"S3","ts":"2026-11-05T14:22:15.555Z","type":"story_complete"}
+{"duration_secs":73,"files_created":1,"files_modified":1,"id":"S2","ts":"2026-11-05T14:22:16.592Z","type":"story_complete"}
+{"completed":3,"percentage":100,"total":3,"ts":"2026-11-05T14:22:17.629Z","type":"progress"}
+{"stats":{"files_created":3,"files_modified":1,"stories_completed":3,"stories_skipped":0,"total_commits":3},"success":true,"total_time_secs":191,"ts":"2026-11-05T14:22:18.666Z","type":"done"}

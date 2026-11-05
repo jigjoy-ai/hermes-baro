@@ -1,0 +1,8 @@
+{"ts":"2026-11-05T14:22:00.000Z","type":"architect_start"}
+{"ts":"2026-11-05T14:22:01.037Z","type":"architect_complete"}
+{"type":"plan_ready","stories":3}
+{"project":"todo-api","protocol":3,"runner":"ci-runner-1","stories":[{"depends_on":[],"id":"S1","title":"Add Todo model"},{"depends_on":["S1"],"id":"S2","title":"Add REST endpoints"},{"depends_on":["S1","S2"],"id":"S3","title":"Add endpoint tests"}],"ts":"2026-11-05T14:22:03.111Z","type":"init"}
+{"gates":[{"enforced_by":"src/verification/verify.ts","id":"build-before-commit","summary":"The project must build before a commit is accepted."}],"ts":"2026-11-05T14:22:04.148Z","type":"gates"}
+{"levels":[[{"id":"S1"}],[{"id":"S2"}],[{"id":"S3"}]],"ts":"2026-11-05T14:22:05.185Z","type":"dag"}
+{"id":"S1","title":"S1","ts":"2026-11-05T14:22:06.222Z","type":"story_start"}
+{"id":"S1","line":"Reading package.json","ts":"2026-11-05T14:22:07.259Z","type":"story_log"}
