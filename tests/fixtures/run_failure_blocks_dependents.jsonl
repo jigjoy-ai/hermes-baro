@@ -1,12 +1,7 @@
-{"ts":"2026-11-05T14:22:00.000Z","type":"architect_start"}
-{"ts":"2026-11-05T14:22:01.037Z","type":"architect_complete"}
-{"type":"plan_ready","stories":4}
-{"project":"todo-api","protocol":3,"runner":"ci-runner-1","stories":[{"depends_on":[],"id":"S1","title":"Add Todo model"},{"depends_on":["S1"],"id":"S2","title":"Add REST endpoints"},{"depends_on":["S2"],"id":"S3","title":"Add endpoint tests"},{"depends_on":[],"id":"S4","title":"Write README"}],"ts":"2026-11-05T14:22:03.111Z","type":"init"}
-{"gates":[{"enforced_by":"src/verification/verify.ts","id":"build-before-commit","summary":"The project must build before a commit is accepted."}],"ts":"2026-11-05T14:22:04.148Z","type":"gates"}
-{"id":"S1","title":"S1","ts":"2026-11-05T14:22:05.185Z","type":"story_start"}
-{"id":"S4","title":"S4","ts":"2026-11-05T14:22:06.222Z","type":"story_start"}
-{"attempt":1,"id":"S1","ts":"2026-11-05T14:22:07.259Z","type":"story_retry"}
-{"duration_secs":18,"files_created":0,"files_modified":1,"id":"S4","ts":"2026-11-05T14:22:08.296Z","type":"story_complete"}
-{"attempt":2,"error":"tsc: src/models/todo.ts(12,5): error TS2322","id":"S1","max_retries":2,"ts":"2026-11-05T14:22:09.333Z","type":"story_error"}
-{"blocked":["S2","S3"],"failed":["S1"],"ordinal":0,"passed":["S4"],"ts":"2026-11-05T14:22:10.370Z","type":"level_completed"}
-{"abort_reason":"1 story failed: S1","stats":{"files_created":0,"files_modified":1,"stories_completed":1,"stories_skipped":3,"total_commits":1},"success":false,"total_time_secs":133,"ts":"2026-11-05T14:22:11.407Z","type":"done"}
+{"type":"init","protocol":3,"project":"p","stories":[{"id":"S1","title":"S1","depends_on":[]},{"id":"S2","title":"S2","depends_on":["S1"]},{"id":"S3","title":"S3","depends_on":["S2"]},{"id":"S4","title":"S4","depends_on":["S3"]}],"runner":"macbook"}
+{"type":"story_start","id":"S1","title":"S1"}
+{"type":"story_retry","id":"S1","attempt":1}
+{"type":"story_complete","id":"S1","duration_secs":12,"files_created":1,"files_modified":1}
+{"type":"story_start","id":"S2","title":"S2"}
+{"type":"story_error","id":"S2","error":"tests failed","attempt":3,"max_retries":3}
+{"type":"done","success":false,"abort_reason":"verification failed: npm test"}

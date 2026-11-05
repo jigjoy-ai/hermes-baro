@@ -47,8 +47,8 @@ def mapped(lines):
 def fixture_line(load_fixture, name, baro_type):
     """The first raw line of ``name`` whose Baro ``type`` is ``baro_type``."""
     for line in load_fixture(name):
-        if json.loads(line).get("type") == baro_type:
-            return line
+        if line.startswith("{") and json.loads(line).get("type") == baro_type:
+            return line  # non-JSON lines (Baro's "garbage line") are skipped
     raise AssertionError(f"{name} has no {baro_type} line")
 
 
@@ -91,13 +91,16 @@ def test_type_map_covers_every_kind_and_cites_baro_source():
 
 
 @pytest.mark.parametrize("name", FIXTURES)
-def test_every_fixture_line_is_a_json_object_that_parses(load_fixture, name):
+def test_every_fixture_line_parses_or_is_skipped_as_non_json(load_fixture, name):
     lines = load_fixture(name)
     assert lines
     for line in lines:
         event = parse_line(line)
-        assert isinstance(event, BaroEvent), line
-        assert isinstance(event.raw, dict)
+        if line.lstrip().startswith("{"):
+            assert isinstance(event, BaroEvent), line
+            assert isinstance(event.raw, dict)
+        else:
+            assert event is None, line  # e.g. run_success's "garbage line"
 
 
 def test_fixtures_exercise_every_mapped_kind(load_fixture):
@@ -108,69 +111,58 @@ def test_fixtures_exercise_every_mapped_kind(load_fixture):
 
 
 def test_run_success(load_fixture):
-    evs = mapped(load_fixture("run_success.jsonl"))
-    assert [e.kind for e in evs] == [
+    lines = load_fixture("run_success.jsonl")
+    assert [parse_line(l) and parse_line(l).kind for l in lines] == [
         "plan",
-        "story_start",
-        "story_progress",
-        "story_progress",
-        "story_complete",
-        "story_start",
-        "story_start",
-        "story_progress",
-        "story_complete",
+        None,  # garbage line
+        "unknown",  # activity without a story id
         "story_complete",
         "run_end",
     ]
-    plan = evs[0]
-    assert plan.stories == (
-        PlannedStory("S1", "Add Todo model", ()),
-        PlannedStory("S2", "Add REST endpoints", ("S1",)),
-        PlannedStory("S3", "Add model tests", ("S1",)),
-    )
-    assert plan.ts == "2026-11-05T14:22:03.111Z"
-    assert evs[1].story_id == "S1"
-    assert evs[2].story_id == "S1" and evs[2].message == "Creating src/models/todo.ts"
-    assert evs[3].message == "src/models/todo.ts"  # activity text
-    assert evs[4].story_id == "S1"
-    end = evs[-1]
+    plan, complete, end = mapped(lines)
+    assert plan.stories == (PlannedStory("S1", "", ()),)
+    assert complete.story_id == "S1"
     assert (end.outcome, end.error) == ("completed", None)
 
 
-def test_replan_adds_prerequisite(load_fixture):
+def test_replan_adds_prerequisite_to_a_ready_story(load_fixture):
     evs = mapped(load_fixture("run_replan_adds_prereq.jsonl"))
-    plan = evs[0]
-    assert plan.kind == "plan"
-    s3 = next(s for s in plan.stories if s.id == "S3")
-    assert s3.depends_on == ()  # S3 starts out ready
-    replan = next(e for e in evs if e.kind == "replan")
-    started_before = {e.story_id for e in evs[: evs.index(replan)] if e.kind == "story_start"}
-    assert "S3" not in started_before
-    assert replan.stories == (
-        PlannedStory("S4", "Add full-text index migration", ()),
-        PlannedStory("S3", "", ("S4",)),  # rewired: title not restated
+    assert [e.kind for e in evs] == ["plan", "story_start", "replan", "story_complete", "replan"]
+    plan, start, first, complete, second = evs
+    assert plan.stories == (PlannedStory("S1", "One", ()), PlannedStory("S2", "Two", ("S1",)))
+    assert start.story_id == "S1"
+    # first replan: S3 is added on S1, S2 is removed
+    assert first.stories == (
+        PlannedStory("S3", "Three", ("S1",)),
+        PlannedStory("S1", "", ()),  # rewired: title not restated
     )
-    assert replan.removed == ()
-    assert replan.message == "search requires a full-text index migration first"
-    assert replan.ts == "2026-11-05T14:22:07.259Z"
-    assert evs[-1].kind == "run_end" and evs[-1].outcome == "completed"
+    assert (first.removed, first.message) == (("S2",), "scope shift")
+    # S1 completes, so S3 is ready and has not started
+    assert complete.story_id == "S1"
+    assert "S3" not in {e.story_id for e in evs if e.kind == "story_start"}
+    # second replan adds S2a and makes it S3's prerequisite
+    assert second.stories == (
+        PlannedStory("S2a", "First half of S2", ("S1",)),
+        PlannedStory("S3", "", ("S2a",)),
+    )
+    assert (second.removed, second.message) == (("S2",), "S2 too large")
+    assert second.ts is None  # captured test events carry no ts
 
 
 def test_failure_blocks_dependents(load_fixture):
     lines = load_fixture("run_failure_blocks_dependents.jsonl")
     evs = mapped(lines)
-    plan = evs[0]
-    deps = {s.id: s.depends_on for s in plan.stories}
-    assert deps == {"S1": (), "S2": ("S1",), "S3": ("S2",), "S4": ()}
+    deps = {s.id: s.depends_on for s in evs[0].stories}
+    assert deps == {"S1": (), "S2": ("S1",), "S3": ("S2",), "S4": ("S3",)}
+    assert [s.title for s in evs[0].stories] == ["S1", "S2", "S3", "S4"]
     failed = [e for e in evs if e.kind == "story_failed"]
-    assert len(failed) == 1
-    assert failed[0].story_id == "S1"
-    assert failed[0].error == "tsc: src/models/todo.ts(12,5): error TS2322"
-    started = {e.story_id for e in evs if e.kind == "story_start"}
-    assert started == {"S1", "S4"}  # dependents never start
+    assert [(e.story_id, e.error) for e in failed] == [("S2", "tests failed")]
+    assert {e.story_id for e in evs if e.kind == "story_complete"} == {"S1"}
+    # the direct (S3) and transitive (S4) dependents never start
+    assert {e.story_id for e in evs if e.kind == "story_start"} == {"S1", "S2"}
     end = evs[-1]
     assert end.kind == "run_end"
-    assert (end.outcome, end.error) == ("failed", "1 story failed: S1")
+    assert (end.outcome, end.error) == ("failed", "verification failed: npm test")
     # story_retry is not a terminal state: it stays unknown
     retry = parse_line(fixture_line(load_fixture, "run_failure_blocks_dependents.jsonl", "story_retry"))
     assert retry.kind == "unknown"
@@ -181,12 +173,13 @@ def test_plan_only_has_plan_with_edges_then_story_start(load_fixture):
     ks = kinds(lines)
     assert ks.index("plan") < ks.index("story_start")
     plan = mapped(lines)[0]
-    assert plan.kind == "plan"
-    assert {(d, s.id) for s in plan.stories for d in s.depends_on} == {
-        ("S1", "S2"),
-        ("S1", "S3"),
-        ("S2", "S3"),
-    }
+    assert plan.stories == (
+        PlannedStory("S1", "First story", ()),
+        PlannedStory("S2", "Second story", ("S1",)),
+    )
+    assert {(d, s.id) for s in plan.stories for d in s.depends_on} == {("S1", "S2")}
+    progress = mapped(lines)[-1]
+    assert (progress.kind, progress.story_id, progress.message) == ("story_progress", "S1", "cargo test")
     # the host-printed plan_ready line has no ts: unknown, never None
     plan_ready = parse_line(fixture_line(load_fixture, "plan_only.jsonl", "plan_ready"))
     assert plan_ready.kind == "unknown" and plan_ready.ts is None
@@ -214,8 +207,8 @@ def test_linebuffer_reassembles_arbitrary_chunk_splits(load_fixture, name, seed)
 
 
 def test_linebuffer_holds_back_partial_line_until_completed(load_fixture):
-    lines = load_fixture("run_success.jsonl")
-    first, second, third = lines[6], lines[7], lines[8]
+    lines = load_fixture("plan_only.jsonl")
+    first, second, third = lines[1], lines[3], lines[-1]
     buf = LineBuffer()
     assert buf.feed(first[:10]) == []
     assert buf.feed(first[10:] + "\n" + second[:5]) == [first]
@@ -249,6 +242,7 @@ def test_blank_non_json_and_non_object_lines_return_none(load_fixture):
         "   ",
         "\r",
         *(line[: len(line) // 2] for line in lines),  # clipped mid-line
+        lines[1],  # Baro's own "garbage line"
         "[orchestrator] " + lines[0],  # non-JSON prefix
         dumps(init["stories"]),  # JSON array
         dumps(init["protocol"]),  # JSON number
@@ -260,15 +254,14 @@ def test_blank_non_json_and_non_object_lines_return_none(load_fixture):
 
 
 UNKNOWN_CASES = {
-    "gates": lambda lf: fixture_line(lf, "run_success.jsonl", "gates"),
-    "dag": lambda lf: fixture_line(lf, "run_success.jsonl", "dag"),
-    "progress": lambda lf: fixture_line(lf, "run_success.jsonl", "progress"),
-    "level_completed": lambda lf: fixture_line(lf, "run_failure_blocks_dependents.jsonl", "level_completed"),
-    "architect_start": lambda lf: fixture_line(lf, "plan_only.jsonl", "architect_start"),
-    "no type": lambda lf: mutated(lf, "run_success.jsonl", "story_start", type=...),
-    "numeric type": lambda lf: mutated(lf, "run_success.jsonl", "story_start", type=42),
-    "null type": lambda lf: mutated(lf, "run_success.jsonl", "story_start", type=None),
-    "story_start without id": lambda lf: mutated(lf, "run_success.jsonl", "story_start", id=...),
+    "dag": lambda lf: fixture_line(lf, "plan_only.jsonl", "dag"),
+    "routed": lambda lf: fixture_line(lf, "plan_only.jsonl", "routed"),
+    "story_retry": lambda lf: fixture_line(lf, "run_failure_blocks_dependents.jsonl", "story_retry"),
+    "activity without id": lambda lf: fixture_line(lf, "run_success.jsonl", "activity"),
+    "no type": lambda lf: mutated(lf, "plan_only.jsonl", "story_start", type=...),
+    "numeric type": lambda lf: mutated(lf, "plan_only.jsonl", "story_start", type=42),
+    "null type": lambda lf: mutated(lf, "plan_only.jsonl", "story_start", type=None),
+    "story_start without id": lambda lf: mutated(lf, "plan_only.jsonl", "story_start", id=...),
     "story_complete numeric id": lambda lf: mutated(lf, "run_success.jsonl", "story_complete", id=7),
     "story_error empty id": lambda lf: mutated(lf, "run_failure_blocks_dependents.jsonl", "story_error", id=""),
 }
@@ -281,14 +274,14 @@ def test_unmapped_or_malformed_objects_are_unknown(load_fixture, case):
 
 
 def test_tolerates_missing_and_wrongly_typed_optional_fields(load_fixture):
-    run = "run_success.jsonl"
-    assert parse_line(mutated(load_fixture, run, "init", stories=...)).stories == ()
-    init = fixture_event(load_fixture, run, "init")
+    po = "plan_only.jsonl"
+    assert parse_line(mutated(load_fixture, po, "init", stories=...)).stories == ()
+    init = fixture_event(load_fixture, po, "init")
     s1, s2 = init["stories"][0], init["stories"][1]
     plan = parse_line(
         mutated(
             load_fixture,
-            run,
+            po,
             "init",
             stories=[
                 {"id": s1["id"]},  # title and depends_on missing
@@ -307,16 +300,21 @@ def test_tolerates_missing_and_wrongly_typed_optional_fields(load_fixture):
     removed = parse_line(mutated(load_fixture, rp, "replan", added=None, rewired=..., removed=["S3"]))
     assert (removed.stories, removed.removed) == ((), ("S3",))
 
-    log = parse_line(mutated(load_fixture, run, "story_log", line=None, ts=5))
-    assert (log.kind, log.story_id, log.message, log.ts) == ("story_progress", "S1", None, None)
+    progress = parse_line(mutated(load_fixture, po, "activity", text=None, ts=5))
+    assert (progress.kind, progress.story_id, progress.message, progress.ts) == (
+        "story_progress",
+        "S1",
+        None,
+        None,
+    )
 
 
 DONE_CASES = [
     ("run_success.jsonl", {}, "completed", None),
-    ("run_failure_blocks_dependents.jsonl", {}, "failed", "1 story failed: S1"),
+    ("run_failure_blocks_dependents.jsonl", {}, "failed", "verification failed: npm test"),
     ("run_failure_blocks_dependents.jsonl", {"abort_reason": ...}, "failed", None),
     ("run_success.jsonl", {"success": ...}, "completed", None),  # pre-v3 stream
-    ("run_failure_blocks_dependents.jsonl", {"success": ...}, "failed", "1 story failed: S1"),
+    ("run_failure_blocks_dependents.jsonl", {"success": ...}, "failed", "verification failed: npm test"),
 ]
 
 

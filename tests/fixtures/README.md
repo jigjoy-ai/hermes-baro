@@ -1,67 +1,96 @@
 # Recorded Baro headless event fixtures
 
-Each `*.jsonl` file is a stdout stream of `baro --headless`: one JSON object per
-line. The lines were reconstructed from Baro's own emit sites, not invented.
-Every `type` and field name below appears in Baro's source. All paths are
-relative to the Baro repository.
+Each `*.jsonl` file is a `baro --headless` stdout stream, one line per event.
+Every line was taken from Baro's own repository, in one of two ways:
 
-## How the lines are serialised
+- **verbatim**: the cited source span contains exactly this event. It is
+  either a JSON string the Baro tests feed to a consumer, or the object a Baro
+  forwarder test captured from the real emitter's stdout (`captureStdout` →
+  `assert.deepEqual(events, [...])`). The only change is that a JSON string
+  split across lines in the source is joined into one line, with the
+  line-break indentation removed. Keys, values and key order are unchanged.
+- **projection**: Baro's emit code applied to Baro test data, both cited. Two
+  lines in the whole set are projections, because no Baro test contains them
+  as a literal.
 
-- The orchestrator writes each event as `JSON.stringify({ ts, ...event })`
-  (`packages/baro-orchestrator/src/tui-protocol.ts:237-238`). The event shapes
-  are the `BaroEvent` union at `packages/baro-orchestrator/src/tui-protocol.ts:88-230`.
-- In headless mode the Rust host parses each orchestrator line and echoes it
-  to stdout (`crates/baro-tui/src/orchestrator_client.rs:204-217`) through
-  `stamped_jsonl`/`serde_json::Value::to_string`
-  (`crates/baro-tui/src/events.rs:609-620`). `serde_json` is built without
-  `preserve_order` (`crates/baro-tui/Cargo.toml:20`), so keys come out sorted
-  and compact. The fixtures use that byte form.
-- The host also prints lines of its own:
-  - `architect_start` and `architect_complete` (`crates/baro-tui/src/main.rs:2172`, `:2178`);
-  - `{"type":"plan_ready","stories":N}`, written by a raw `println!` with no `ts`
-    (`crates/baro-tui/src/main.rs:1426`, `:2014`).
+No value was made up. Every id, title, project name, error text and number
+comes from the cited span.
 
-## Event sources
+## How a headless stream is formed (why these shapes)
 
-| type | shape | emitted at |
-|---|---|---|
-| `init` | tui-protocol.ts:93, StoryInfo at :19-23 | orchestrate.ts:1906-1918 |
-| `gates` | tui-protocol.ts:90 | orchestrate.ts (after init); values copied from execution/gate-registry.ts:61-63 |
-| `dag` | tui-protocol.ts:97 | orchestrate.ts:1929 |
-| `story_start` | tui-protocol.ts:98 (title = agent id) | execution/forwarders/story-lifecycle.ts:198 |
-| `story_log` | tui-protocol.ts:100 | many, e.g. integration/git-coordinator.ts:399 |
-| `activity` | tui-protocol.ts:164-174 | planning/application/plan-events.ts:35, verification/verify.ts:1497 |
-| `story_retry` | tui-protocol.ts:115 | execution/forwarders/story-lifecycle.ts:206 |
-| `story_complete` | tui-protocol.ts:101-107 | execution/forwarders/story-lifecycle.ts:258 |
-| `story_error` | tui-protocol.ts:108-114 (terminal; see docs/tui-protocol-v3.md §5) | execution/forwarders/story-lifecycle.ts:237 |
-| `progress` | tui-protocol.ts:116 | execution/forwarders/progress.ts:279 |
-| `level_started` / `level_completed` | tui-protocol.ts:188-195 | execution/forwarders/dag.ts |
-| `replan` | tui-protocol.ts:177-184 | execution/forwarders/dag.ts:134-148 (`source` format `agent:<id>@graph-v<n>` from :118) |
-| `done` | tui-protocol.ts:120-131 | orchestrate.ts:2167-2185 |
+- The orchestrator writes `JSON.stringify({ ts, ...event })` per line
+  (`packages/baro-orchestrator/src/tui-protocol.ts:237-238`). Event shapes are
+  the `BaroEvent` union at `packages/baro-orchestrator/src/tui-protocol.ts:88-230`.
+- `baro --headless` echoes each orchestrator line to stdout
+  (`crates/baro-tui/src/orchestrator_client.rs:204-217`), and prints a few host
+  lines of its own, e.g. `plan_ready` (`crates/baro-tui/src/main.rs:1426`).
+- `ts` is absent from these fixtures because Baro's capture helper strips the
+  wall-clock `ts` from every emitted line before tests assert on it
+  (`packages/baro-orchestrator/test/execution/helpers.ts:65-77`, `captureStdout`).
+  The v3 contract says the same (`docs/tui-protocol-v3.md`, section 1). The
+  parser treats `ts` as optional.
 
-All paths in this table are under `packages/baro-orchestrator/src/` unless they
-start with `docs/`. The replan line is laid out the same way as Baro's own
-parser test (`crates/baro-tui/src/events.rs:420-424`).
+## Per-line provenance
 
-## Fixtures
+Paths are relative to the Baro repository root. `L` is the fixture line number.
 
-- **run_success.jsonl**: a complete successful run. The plan is
-  S1 ← {S2, S3}. Each story starts, logs and completes. It ends with `done`
-  and `success:true`.
-- **run_replan_adds_prereq.jsonl**: S3 is planned with no dependencies, so it is
-  *ready*. While S1 runs, S3 has not started. A runtime `replan` then adds S4
-  and rewires S3 onto `["S4"]` (`rewired[].depends_on` is S3's full new
-  dependency list). S4, then S3, run to completion, and the stream ends with a
-  successful `done`.
-- **run_failure_blocks_dependents.jsonl**: the plan is S1 ← S2 ← S3, plus an
-  independent S4. S1 retries once (`story_retry`) and then fails terminally
-  (`story_error`). S2 is its direct dependent and S3 its transitive dependent;
-  neither ever starts. S4 completes. `level_completed` reports S2 and S3 as
-  blocked, and the stream ends with `done` (`success:false` and an
-  `abort_reason`).
-- **plan_only.jsonl**: the architect and plan phase, then `init` with dependency
-  edges (S2→S1, S3→S1 and S3→S2). The `dag` event follows, then the first
-  `story_start` and a `story_log`, which mark the point where execution begins.
+| fixture | L | method | source |
+|---|---|---|---|
+| run_success.jsonl | 1 | verbatim | packages/baro-dsh/test/delegate-run.test.ts:54 |
+| run_success.jsonl | 2 | verbatim | packages/baro-dsh/test/delegate-run.test.ts:55 |
+| run_success.jsonl | 3 | verbatim | packages/baro-dsh/test/delegate-run.test.ts:56 |
+| run_success.jsonl | 4 | verbatim | packages/baro-dsh/test/delegate-run.test.ts:57 |
+| run_success.jsonl | 5 | verbatim | packages/baro-dsh/test/delegate-run.test.ts:58 |
+| plan_only.jsonl | 1 | projection | crates/baro-tui/src/main.rs:1426 |
+| plan_only.jsonl | 2 | verbatim | crates/baro-tui/src/screens/execute.rs:715-716 |
+| plan_only.jsonl | 3 | verbatim | crates/baro-tui/src/screens/execute.rs:718 |
+| plan_only.jsonl | 4 | verbatim | crates/baro-tui/src/screens/execute.rs:719 |
+| plan_only.jsonl | 5 | verbatim | crates/baro-tui/src/screens/execute.rs:720 |
+| plan_only.jsonl | 6 | verbatim | crates/baro-tui/src/screens/execute.rs:721 |
+| run_replan_adds_prereq.jsonl | 1 | verbatim | crates/baro-tui/src/app.rs:2253-2254 |
+| run_replan_adds_prereq.jsonl | 2 | verbatim | crates/baro-tui/src/app.rs:2258 |
+| run_replan_adds_prereq.jsonl | 3 | verbatim | crates/baro-tui/src/app.rs:2363-2365 |
+| run_replan_adds_prereq.jsonl | 4 | verbatim | packages/baro-orchestrator/test/execution/forwarders/story-lifecycle.test.ts:73-79 |
+| run_replan_adds_prereq.jsonl | 5 | verbatim | packages/baro-orchestrator/test/execution/forwarders/dag.test.ts:73-80 |
+| run_failure_blocks_dependents.jsonl | 1 | projection | packages/baro-orchestrator/src/orchestrate.ts:1905-1917; packages/baro-orchestrator/test/execution-mode.test.ts:124-140; packages/baro-orchestrator/test/execution-mode.test.ts:426-431; crates/baro-tui/src/screens/execute.rs:715 |
+| run_failure_blocks_dependents.jsonl | 2 | verbatim | packages/baro-orchestrator/test/execution/forwarders/story-lifecycle.test.ts:71 |
+| run_failure_blocks_dependents.jsonl | 3 | verbatim | packages/baro-orchestrator/test/execution/forwarders/story-lifecycle.test.ts:72 |
+| run_failure_blocks_dependents.jsonl | 4 | verbatim | packages/baro-orchestrator/test/execution/forwarders/story-lifecycle.test.ts:73-79 |
+| run_failure_blocks_dependents.jsonl | 5 | verbatim | packages/baro-orchestrator/test/execution/forwarders/story-lifecycle.test.ts:145 |
+| run_failure_blocks_dependents.jsonl | 6 | verbatim | packages/baro-orchestrator/test/execution/forwarders/story-lifecycle.test.ts:101-107 |
+| run_failure_blocks_dependents.jsonl | 7 | verbatim | packages/baro-orchestrator/test/operator/run-tracker.test.ts:110 |
 
-Timestamps, story titles, error text and the project name are illustrative
-values. The types, field names and nesting are Baro's.
+## The two projections
+
+- **plan_only.jsonl L1:** `println!(r#"{{"type":"plan_ready","stories":{}}}"#, stories.len())`
+  (`crates/baro-tui/src/main.rs:1426`), where `stories.len()` = 2, the story
+  count of the plan on L2.
+- **run_failure_blocks_dependents.jsonl L1:** the `init` emit at
+  `packages/baro-orchestrator/src/orchestrate.ts:1905-1917` applied to Baro's
+  chained test PRD (`execution-mode.test.ts:426-431`, ids S1→S2→S3→S4, built by
+  the `prd()` helper at `:124-140`: `project: "p"`, `title: s.id`). Key order
+  follows the emit literal. `mode` and `mode_reason` are `undefined` for that
+  PRD, so `JSON.stringify` drops them. `runner: hostname()` uses the runner
+  name from Baro's own test stream (`crates/baro-tui/src/screens/execute.rs:715`, `"macbook"`).
+
+## Scenarios
+
+- **run_success.jsonl**: the scripted headless child stream that Baro's
+  `DelegateRun` test reads to completion. It holds one story, a non-JSON
+  `garbage line`, an `activity` with no story id, the completion, and `done`
+  with `success:true`.
+- **plan_only.jsonl**: the plan (S2 depends on S1), then the DAG, then the
+  first `story_start`, after which execution has begun (`routed`, `activity`).
+- **run_replan_adds_prereq.jsonl**: the plan is S1 ← S2. While S1 runs,
+  Baro's sentry replan removes S2 and adds S3, which depends on S1 (app.rs
+  replan test). S1 then completes, which makes **S3 ready while it has not
+  started**. The surgeon replan that Baro's DAG forwarder actually emitted
+  then adds S2a and rewires S3 onto `["S2a"]`. S3 is now blocked on a new
+  prerequisite. Its `removed:["S2"]` names a story the first replan already
+  removed, so consumers must treat removing an unknown id as a no-op. The
+  stream ends mid-run, as `baro_status` sees a live run.
+- **run_failure_blocks_dependents.jsonl**: the chain is S1 ← S2 ← S3 ← S4.
+  The lifecycle forwarder emits that S1 starts, retries once and completes.
+  S2 then starts and fails terminally (`story_error`, attempt 3 of 3). S3 is
+  its direct dependent and S4 its transitive dependent, and neither starts.
+  The run ends with `done`, `success:false` and an `abort_reason`.
