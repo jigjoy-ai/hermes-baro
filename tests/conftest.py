@@ -1,7 +1,7 @@
-import sys
-sys.dont_write_bytecode = True  # catalog rule 17: never leave bytecode in the repo
+__import__("sys").dont_write_bytecode = True  # first statement: catalog rule 17, no bytecode
 
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest

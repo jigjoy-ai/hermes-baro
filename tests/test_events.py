@@ -1,4 +1,13 @@
+"""Event parser and run-id tests.
+
+Every Baro event input comes from the recorded fixtures via ``load_fixture``:
+either a fixture line verbatim, or a fixture event with fields removed,
+retyped or truncated to model malformed/older streams.
+"""
+
+import copy
 import inspect
+import json
 import random
 import re
 import typing
@@ -33,6 +42,34 @@ def kinds(lines):
 
 def mapped(lines):
     return [e for e in map(parse_line, lines) if e is not None and e.kind != "unknown"]
+
+
+def fixture_line(load_fixture, name, baro_type):
+    """The first raw line of ``name`` whose Baro ``type`` is ``baro_type``."""
+    for line in load_fixture(name):
+        if json.loads(line).get("type") == baro_type:
+            return line
+    raise AssertionError(f"{name} has no {baro_type} line")
+
+
+def fixture_event(load_fixture, name, baro_type):
+    """A mutable copy of that fixture event."""
+    return copy.deepcopy(json.loads(fixture_line(load_fixture, name, baro_type)))
+
+
+def dumps(obj):
+    return json.dumps(obj, separators=(",", ":"))
+
+
+def mutated(load_fixture, name, baro_type, **changes):
+    """Fixture event with fields replaced; a value of ``...`` deletes the field."""
+    obj = fixture_event(load_fixture, name, baro_type)
+    for key, value in changes.items():
+        if value is ...:
+            obj.pop(key, None)
+        else:
+            obj[key] = value
+    return dumps(obj)
 
 
 # --- _TYPE_MAP -------------------------------------------------------------
@@ -135,7 +172,7 @@ def test_failure_blocks_dependents(load_fixture):
     assert end.kind == "run_end"
     assert (end.outcome, end.error) == ("failed", "1 story failed: S1")
     # story_retry is not a terminal state: it stays unknown
-    retry = next(parse_line(l) for l in lines if '"story_retry"' in l)
+    retry = parse_line(fixture_line(load_fixture, "run_failure_blocks_dependents.jsonl", "story_retry"))
     assert retry.kind == "unknown"
 
 
@@ -150,8 +187,8 @@ def test_plan_only_has_plan_with_edges_then_story_start(load_fixture):
         ("S1", "S3"),
         ("S2", "S3"),
     }
-    # host-printed lines without ts parse as unknown, never as None
-    plan_ready = parse_line('{"type":"plan_ready","stories":3}')
+    # the host-printed plan_ready line has no ts: unknown, never None
+    plan_ready = parse_line(fixture_line(load_fixture, "plan_only.jsonl", "plan_ready"))
     assert plan_ready.kind == "unknown" and plan_ready.ts is None
 
 
@@ -176,91 +213,131 @@ def test_linebuffer_reassembles_arbitrary_chunk_splits(load_fixture, name, seed)
     assert [parse_line(l) for l in out] == [parse_line(l) for l in lines]
 
 
-def test_linebuffer_holds_back_partial_line_until_completed():
+def test_linebuffer_holds_back_partial_line_until_completed(load_fixture):
+    lines = load_fixture("run_success.jsonl")
+    first, second, third = lines[6], lines[7], lines[8]
     buf = LineBuffer()
-    first, second = '{"type":"story_start","id":"S1","title":"S1"}', '{"type":"story_log",'
     assert buf.feed(first[:10]) == []
-    assert buf.feed(first[10:] + "\n" + second) == [first]
+    assert buf.feed(first[10:] + "\n" + second[:5]) == [first]
     assert buf.feed("") == []
-    assert buf.feed('"id":"S1","line":"x"}\r\n') == ['{"type":"story_log","id":"S1","line":"x"}']
-    assert buf.feed("tail-without-newline") == []
-    assert buf.flush() == ["tail-without-newline"]
+    assert buf.feed(second[5:] + "\r\n") == [second]  # CRLF tolerated
+    assert buf.feed(third) == []  # stream ended without a newline
+    assert buf.flush() == [third]
     assert buf.flush() == []
+    assert parse_line(third).kind == "story_progress"
 
 
-def test_linebuffer_one_byte_at_a_time():
+def test_linebuffer_one_byte_at_a_time(load_fixture):
+    lines = load_fixture("plan_only.jsonl")[:3]
+    text = lines[0] + "\n\n" + lines[1] + "\n" + lines[2] + "\n"
     buf = LineBuffer()
     out = []
-    for ch in "a\n\nb\n":
+    for ch in text:
         out.extend(buf.feed(ch))
-    assert out == ["a", "", "b"]
+    assert out == [lines[0], "", lines[1], lines[2]]
+    assert parse_line("") is None
 
 
 # --- parse_line edge cases -----------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "line",
-    ["", "   ", "\n", "not json", "{", '{"type":', "[1, 2]", "42", '"story_start"', "null", "true"],
-)
-def test_blank_non_json_and_non_object_lines_return_none(line):
-    assert parse_line(line) is None
+def test_blank_non_json_and_non_object_lines_return_none(load_fixture):
+    lines = load_fixture("run_success.jsonl")
+    init = fixture_event(load_fixture, "run_success.jsonl", "init")
+    candidates = [
+        "",
+        "   ",
+        "\r",
+        *(line[: len(line) // 2] for line in lines),  # clipped mid-line
+        "[orchestrator] " + lines[0],  # non-JSON prefix
+        dumps(init["stories"]),  # JSON array
+        dumps(init["protocol"]),  # JSON number
+        dumps(init["project"]),  # JSON string
+        "null",
+    ]
+    for line in candidates:
+        assert parse_line(line) is None, line
 
 
-@pytest.mark.parametrize(
-    "line",
-    [
-        '{"type":"gates","gates":[]}',
-        '{"type":"suspension_gap_absorbed","gap_ms":1}',
-        '{"no_type":true}',
-        '{"type":42}',
-        '{"type":null}',
-        '{"type":"story_start"}',  # mapped type but no story id
-        '{"type":"story_complete","id":7}',
-        '{"type":"story_error","id":""}',
-    ],
-)
-def test_unmapped_or_malformed_objects_are_unknown(line):
-    event = parse_line(line)
+UNKNOWN_CASES = {
+    "gates": lambda lf: fixture_line(lf, "run_success.jsonl", "gates"),
+    "dag": lambda lf: fixture_line(lf, "run_success.jsonl", "dag"),
+    "progress": lambda lf: fixture_line(lf, "run_success.jsonl", "progress"),
+    "level_completed": lambda lf: fixture_line(lf, "run_failure_blocks_dependents.jsonl", "level_completed"),
+    "architect_start": lambda lf: fixture_line(lf, "plan_only.jsonl", "architect_start"),
+    "no type": lambda lf: mutated(lf, "run_success.jsonl", "story_start", type=...),
+    "numeric type": lambda lf: mutated(lf, "run_success.jsonl", "story_start", type=42),
+    "null type": lambda lf: mutated(lf, "run_success.jsonl", "story_start", type=None),
+    "story_start without id": lambda lf: mutated(lf, "run_success.jsonl", "story_start", id=...),
+    "story_complete numeric id": lambda lf: mutated(lf, "run_success.jsonl", "story_complete", id=7),
+    "story_error empty id": lambda lf: mutated(lf, "run_failure_blocks_dependents.jsonl", "story_error", id=""),
+}
+
+
+@pytest.mark.parametrize("case", sorted(UNKNOWN_CASES))
+def test_unmapped_or_malformed_objects_are_unknown(load_fixture, case):
+    event = parse_line(UNKNOWN_CASES[case](load_fixture))
     assert event is not None and event.kind == "unknown"
 
 
-def test_tolerates_missing_and_wrongly_typed_optional_fields():
-    assert parse_line('{"type":"init"}').stories == ()
+def test_tolerates_missing_and_wrongly_typed_optional_fields(load_fixture):
+    run = "run_success.jsonl"
+    assert parse_line(mutated(load_fixture, run, "init", stories=...)).stories == ()
+    init = fixture_event(load_fixture, run, "init")
+    s1, s2 = init["stories"][0], init["stories"][1]
     plan = parse_line(
-        '{"type":"init","stories":[{"id":"S1"},"x",{"title":"no id"},'
-        '{"id":"S2","title":5,"depends_on":["S1",3,""]}]}'
+        mutated(
+            load_fixture,
+            run,
+            "init",
+            stories=[
+                {"id": s1["id"]},  # title and depends_on missing
+                "S9",  # not an object
+                {"title": s1["title"]},  # no id
+                {**s2, "title": 5, "depends_on": [*s2["depends_on"], 3, ""]},
+            ],
+        )
     )
     assert plan.kind == "plan"
     assert plan.stories == (PlannedStory("S1", "", ()), PlannedStory("S2", "", ("S1",)))
-    replan = parse_line('{"type":"replan"}')  # Baro's own minimal-payload case
-    assert (replan.kind, replan.stories, replan.removed) == ("replan", (), ())
-    removed = parse_line('{"type":"replan","removed":["S3"],"added":null}')
-    assert removed.removed == ("S3",)
-    log = parse_line('{"type":"story_log","id":"S1","line":null,"ts":5}')
-    assert (log.kind, log.message, log.ts) == ("story_progress", None, None)
+
+    rp = "run_replan_adds_prereq.jsonl"
+    minimal = parse_line(dumps({"type": fixture_event(load_fixture, rp, "replan")["type"]}))
+    assert (minimal.kind, minimal.stories, minimal.removed) == ("replan", (), ())
+    removed = parse_line(mutated(load_fixture, rp, "replan", added=None, rewired=..., removed=["S3"]))
+    assert (removed.stories, removed.removed) == ((), ("S3",))
+
+    log = parse_line(mutated(load_fixture, run, "story_log", line=None, ts=5))
+    assert (log.kind, log.story_id, log.message, log.ts) == ("story_progress", "S1", None, None)
 
 
-@pytest.mark.parametrize(
-    "line,outcome,error",
-    [
-        ('{"type":"done","success":true}', "completed", None),
-        ('{"type":"done","success":false}', "failed", None),
-        ('{"type":"done","success":false,"abort_reason":"x"}', "failed", "x"),
-        ('{"type":"done"}', "completed", None),
-        ('{"type":"done","abort_reason":"stopped"}', "failed", "stopped"),
-    ],
-)
-def test_run_end_outcome(line, outcome, error):
-    event = parse_line(line)
+DONE_CASES = [
+    ("run_success.jsonl", {}, "completed", None),
+    ("run_failure_blocks_dependents.jsonl", {}, "failed", "1 story failed: S1"),
+    ("run_failure_blocks_dependents.jsonl", {"abort_reason": ...}, "failed", None),
+    ("run_success.jsonl", {"success": ...}, "completed", None),  # pre-v3 stream
+    ("run_failure_blocks_dependents.jsonl", {"success": ...}, "failed", "1 story failed: S1"),
+]
+
+
+@pytest.mark.parametrize("name,changes,outcome,error", DONE_CASES)
+def test_run_end_outcome(load_fixture, name, changes, outcome, error):
+    event = parse_line(mutated(load_fixture, name, "done", **changes))
     assert (event.kind, event.outcome, event.error) == ("run_end", outcome, error)
 
 
-def test_parse_line_never_raises_on_hostile_input():
+def test_parse_line_never_raises_on_hostile_input(load_fixture):
     rng = random.Random(7)
-    samples = [None, 3, b"{}", object(), "\x00", "{" * 5000, "[" * 100000, '{"type":"init","stories":{}}']
-    alphabet = '{}[]":,0123456789abtynulfsre\\ \n'
-    samples += ["".join(rng.choice(alphabet) for _ in range(rng.randint(0, 40))) for _ in range(500)]
+    samples = [None, 3, b"{}", object(), "\x00", "{" * 5000, "[" * 100000]
+    samples.append(mutated(load_fixture, "run_success.jsonl", "init", stories={}))
+    for name in FIXTURES:
+        for line in load_fixture(name):
+            samples.extend(line[:cut] for cut in range(len(line)))  # every truncation
+            chars = list(line)
+            for _ in range(5):  # random single-character corruption
+                i = rng.randrange(len(chars))
+                corrupt = chars[:i] + [rng.choice('{}[]":,0an')] + chars[i + 1 :]
+                samples.append("".join(corrupt))
     for sample in samples:
         result = parse_line(sample)
         assert result is None or isinstance(result, BaroEvent)
@@ -271,7 +348,7 @@ def test_parse_line_never_raises_on_hostile_input():
 
 def test_new_run_id_matches_run_id_re():
     for _ in range(50):
-        assert re.match(RUN_ID_RE, new_run_id())
+        assert re.fullmatch(RUN_ID_RE, new_run_id())
 
 
 def test_new_run_id_is_deterministic_with_injected_clock_and_rand():
