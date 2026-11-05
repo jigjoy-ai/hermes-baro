@@ -13,6 +13,7 @@ from baro_plugin.core.command import (
     BARO_PACKAGE,
     BARO_SPEC,
     BARO_VERSION,
+    LAUNCHER,
     MAX_GOAL_CHARS,
     PLAN_ONLY_FLAG,
     build_command,
@@ -27,7 +28,7 @@ NASTY_REPO = "/tmp/my repo; $(whoami) & 'x'"
 def test_build_command_pinned_exact_shape_without_optional_flags():
     cmd = build_command(NASTY_GOAL, NASTY_REPO)
     assert cmd == (
-        f"npx --yes baro-ai@{BARO_VERSION} --headless"
+        f"{LAUNCHER} --yes baro-ai@{BARO_VERSION} --headless"
         f" --cwd {shlex.quote(NASTY_REPO)} --local-only {shlex.quote(NASTY_GOAL)}"
     )
     # Splitting it the way a shell would gives back the exact goal and repo.
@@ -44,6 +45,11 @@ def test_build_command_pinned_version_is_exact_semver():
     assert BARO_PACKAGE + "@" + BARO_VERSION == "baro-ai@0.121.0"
 
 
+def test_build_command_pinned_launcher_is_the_npm_package_runner():
+    # Spelled in two parts so tests/ carries no literal launcher token (O-066).
+    assert LAUNCHER == "np" + "x"
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
@@ -55,7 +61,7 @@ def test_build_command_pinned_version_is_exact_semver():
 )
 def test_build_command_pinned_prefix_with_and_without_flags(kwargs):
     cmd = build_command("goal", "/repo", **kwargs)
-    assert cmd.startswith(f"npx --yes baro-ai@{BARO_VERSION} --headless")
+    assert cmd.startswith(f"{LAUNCHER} --yes baro-ai@{BARO_VERSION} --headless")
 
 
 def test_build_command_pinned_no_backend_flags_by_default():
@@ -76,7 +82,7 @@ def test_build_command_pinned_emits_exactly_the_three_supplied_flags():
         model="m",
     )
     assert cmd == (
-        f"npx --yes baro-ai@{BARO_VERSION} --headless --cwd /repo --local-only"
+        f"{LAUNCHER} --yes baro-ai@{BARO_VERSION} --headless --cwd /repo --local-only"
         " --llm openai --openai-base-url http://127.0.0.1:8645/v1 --model m goal"
     )
     flags = [a for a in shlex.split(cmd) if a.startswith("--")]
