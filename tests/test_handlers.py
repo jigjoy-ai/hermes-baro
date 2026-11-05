@@ -12,7 +12,13 @@ import pytest
 
 from baro_plugin import tools
 from baro_plugin.core.board import Board
-from baro_plugin.core.command import BARO_SPEC, BARO_VERSION, MAX_GOAL_CHARS, build_command
+from baro_plugin.core.command import (
+    BARO_SPEC,
+    BARO_VERSION,
+    LAUNCHER,
+    MAX_GOAL_CHARS,
+    build_command,
+)
 from baro_plugin.core.ids import RUN_ID_RE
 from baro_plugin.core.store import board_key, handle_key
 
@@ -232,7 +238,7 @@ def test_run_build_command_pinned(repo):
     bridge = FakeBridge()
     result = tools.handle_baro_run(bridge, goal_args(repo))
     argv = shlex.split(result["command"])
-    assert argv[1:4] == ["--yes", BARO_SPEC, "--headless"]
+    assert argv[:4] == [LAUNCHER, "--yes", BARO_SPEC, "--headless"]
     assert BARO_SPEC.endswith("@" + BARO_VERSION)
     assert re.fullmatch(r"\d+\.\d+\.\d+", BARO_VERSION)
     assert [c[1] for c in bridge.calls_named("start_background")] == [result["command"]]
