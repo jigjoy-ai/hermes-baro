@@ -8,8 +8,9 @@
 # at hermes_cli/plugin_validate.py:436-458.
 # The Desktop surface needs no manifest key: Hermes loads desktop/plugin.js from
 # its path (index.md:700-703), and plugin_validate_desktop.py lints that file.
-# There are no hooks, commands or privileged host capabilities, so provides_hooks
-# and capabilities are left out (index.md:384-412).
+# provides_hooks lists the one hook register() adds: pre_tool_call, which sends
+# every baro_run and baro_plan call to Hermes's human-approval gate (core/consent.py).
+# There are no commands or privileged host capabilities (index.md:384-412).
 name: baro
 version: 0.1.0
 description: >-
@@ -24,3 +25,5 @@ provides_tools:
   - baro_run
   - baro_status
   - baro_cancel
+provides_hooks:
+  - pre_tool_call

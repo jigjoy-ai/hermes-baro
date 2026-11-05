@@ -34,6 +34,7 @@ class FakeState:
 class FakeCtx:
     def __init__(self, replies=None, cron=None):
         self.tools = []
+        self.hooks = []
         self.dispatched = []
         self.replies = list(replies or [])
         self.cron = cron
@@ -41,6 +42,9 @@ class FakeCtx:
 
     def register_tool(self, name, toolset, schema, handler, **kwargs):
         self.tools.append({"name": name, "toolset": toolset, "schema": schema, "handler": handler})
+
+    def register_hook(self, name, callback):
+        self.hooks.append((name, callback))
 
     def dispatch_tool(self, name, args, **kwargs):
         self.dispatched.append((name, args))
@@ -251,3 +255,45 @@ def test_store_persists_boards_through_ctx_state():
     assert runs.load_handle("baro-20261105T142233Z-a1b2c3") == {"process_id": "proc_ab12", "read_offset": 5}
     assert "handle:baro-20261105T142233Z-a1b2c3" in ctx.state.data
     assert store.get("missing") is None
+
+
+# ---------------------------------------------------------------- launch approval
+
+
+def test_register_adds_one_pre_tool_call_hook():
+    ctx = FakeCtx()
+    register(ctx)
+    assert [name for name, _ in ctx.hooks] == ["pre_tool_call"]
+
+
+@pytest.mark.parametrize("tool", ["baro_run", "baro_plan"])
+def test_every_launch_goes_to_the_human_approval_gate(tool):
+    ctx = FakeCtx()
+    register(ctx)
+    _, hook = ctx.hooks[0]
+    directive = hook(tool_name=tool, args={"goal": "add a kanban", "repo": "/work/app"}, task_id="t1")
+    assert directive["action"] == "approve"
+    assert directive["rule_key"] == "baro:launch"
+    assert "/work/app" in directive["message"]
+    assert '"add a kanban"' in directive["message"]
+    assert "without asking you again" in directive["message"]
+    assert "--local-only" in directive["message"]
+
+
+@pytest.mark.parametrize("tool", ["baro_status", "baro_cancel", "terminal", "read_file"])
+def test_other_tools_are_left_to_hermes(tool):
+    ctx = FakeCtx()
+    register(ctx)
+    _, hook = ctx.hooks[0]
+    assert hook(tool_name=tool, args={}, task_id="") is None
+
+
+def test_the_approval_message_survives_odd_arguments():
+    ctx = FakeCtx()
+    register(ctx)
+    _, hook = ctx.hooks[0]
+    directive = hook(tool_name="baro_run", args=None, task_id="")
+    assert "the repository you named" in directive["message"]
+    long_goal = hook(tool_name="baro_plan", args={"goal": "x " * 500, "repo": "/r"}, task_id="")
+    assert "…" in long_goal["message"]
+    assert "stopped as soon as the plan is ready" in long_goal["message"]

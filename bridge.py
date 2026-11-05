@@ -43,6 +43,7 @@ import json
 import os
 from typing import Any, Callable
 
+from .core.consent import launch_approval
 from .tools import DISPATCH_FAILED, HANDLERS, TOOL_SCHEMAS, ApprovalDenied, DispatchError, error
 
 TOOLSET = "baro"
@@ -308,13 +309,19 @@ def _tool_handler(name: str, bridge: Callable[[], HermesBridge]) -> Callable[...
     return handler
 
 
+def _launch_approval_hook(tool_name: str = "", args: Any = None, task_id: str = "", **kwargs: Any) -> dict | None:
+    """``pre_tool_call``: send every Baro launch to Hermes's human-approval gate (core/consent.py)."""
+    return launch_approval(tool_name, args)
+
+
 def register(ctx: Any) -> None:
-    """Register the four ``baro`` tools (developer-guide/plugins/index.md:917-930).
+    """Register the four ``baro`` tools (developer-guide/plugins/index.md:917-930)
+    and the ``pre_tool_call`` hook that makes a person approve each Baro launch.
 
     The bridge is built on the first tool call, not here.
     ``hermes plugins validate`` runs ``register()`` against a recording stub with
     no ``state`` (hermes_cli/plugin_validate.py:227-268), so register touches
-    nothing but ``register_tool``.
+    nothing but ``register_tool`` and ``register_hook``.
     """
     holder: list[HermesBridge] = []
 
@@ -330,3 +337,4 @@ def register(ctx: Any) -> None:
             schema=TOOL_SCHEMAS[name],
             handler=_tool_handler(name, bridge),
         )
+    ctx.register_hook("pre_tool_call", _launch_approval_hook)

@@ -18,8 +18,46 @@ a board that you can follow live:
 - a Desktop kanban page (`desktop/plugin.js`), served by a small read-only
   backend (`dashboard/`).
 
-Every Baro process starts and stops through Hermes's own `terminal` tool, so
-Hermes approval sees and gates each command.
+## Autonomous by design, safe in the harness
+
+Baro is built to be fire and forget: you hand it a goal, and it plans, builds,
+reviews and integrates the work on its own, normally ending with a pull request.
+It does not stop to ask about each command, because a run executes hundreds of
+them. The safety is not a prompt per command. It is built into Baro's harness, so
+nothing an agent does can be destructive or irreversible:
+
+- **Isolated worktrees.** Every story runs in its own git worktree on its own
+  branch. Agents never write in your checkout, and work is integrated in a
+  separate run worktree on a `baro/<goal>` branch, so your checkout is untouched
+  while a run works.
+- **A contained shell.** A command that would leave the story's worktree is
+  refused before it runs: `cd` or absolute paths outside it, `..` or `~`
+  traversal, nested `sh -c` / `eval`, and redirects through a symlink that
+  escapes it.
+- **No publishing by agents.** `git push`, `gh` and GitHub API calls are refused
+  in every agent lane. Publishing belongs to Baro itself, after review, and
+  through this plugin not at all: the plugin always runs Baro with
+  `--local-only`, so nothing leaves your machine.
+- **Owned files.** Each story writes the files it owns. A write to a file that
+  another unfinished story holds is refused at the write.
+- **Reviewed before it lands.** A story integrates only after the Critic accepts
+  it, against the exact content it reviewed, and the merged result is verified
+  at the end of the run.
+- **Nothing is lost.** The work of a failed or cancelled attempt is kept on a
+  recovery branch, never silently dropped.
+
+### What you approve in Hermes
+
+Because Baro does not ask per command, the plugin asks you once, up front, for
+the whole run. Its `pre_tool_call` hook sends every `baro_run` and `baro_plan`
+call to Hermes's human-approval gate, whatever approval mode you use (`smart`
+included), with a message that says what the run will do. If you deny, the
+approval times out or the gate fails, nothing starts. Cron and unattended
+sessions are denied by Hermes's own defaults, and the plugin refuses them itself
+(see [Unattended contexts](#unattended-contexts)). The plugin never approves on
+your behalf and never turns a Hermes guard off. `baro_status` only reads stored
+state and needs no approval; `baro_cancel` stops a run through Hermes's
+`terminal` tool, which applies its usual approval rules.
 
 ## Install
 
@@ -205,11 +243,12 @@ The panel reads boards through the plugin's own read-only backend
 
 Read this before you install:
 
-- **Coding agents execute shell commands in the target repo.** `baro_run`, and
-  `baro_plan` while it runs, start Baro in the `repo` you pass. Baro's coding
-  agents edit files there and run shell commands there (builds, tests, git).
-  Each start and stop is a terminal command that Hermes asks you to approve. The
-  plugin never approves on your behalf and never turns a guard off.
+- **Coding agents execute shell commands in the target repo, without asking
+  again.** `baro_run`, and `baro_plan` while it runs, start Baro in the `repo`
+  you pass. Once you approve the launch, Baro's coding agents edit files and run
+  shell commands there (builds, tests, git) on their own, inside the limits in
+  [Autonomous by design, safe in the harness](#autonomous-by-design-safe-in-the-harness).
+  The plugin never approves on your behalf and never turns a guard off.
 - **Network calls to configured model providers.** Baro calls the model provider
   you configured for it (or the one you name with `llm` and `openai_base_url`).
   `npx` also downloads the pinned Baro package from the npm registry on first
