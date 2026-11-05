@@ -4,12 +4,15 @@ All Baro output comes from the recorded fixtures via ``load_fixture``: whole
 fixtures, or fixtures with lines dropped to model a different ordering.
 """
 
+import json
 import re
+import shlex
 
 import pytest
 
 from baro_plugin import tools
-from baro_plugin.core.command import BARO_VERSION, MAX_GOAL_CHARS, build_command
+from baro_plugin.core.board import Board
+from baro_plugin.core.command import BARO_SPEC, BARO_VERSION, MAX_GOAL_CHARS, build_command
 from baro_plugin.core.ids import RUN_ID_RE
 from baro_plugin.core.store import board_key, handle_key
 
@@ -221,6 +224,35 @@ def test_run_passes_optional_flags(repo):
     extra = {"llm": "openai", "openai_base_url": "http://localhost:1/v1", "model": "m"}
     result = tools.handle_baro_run(bridge, goal_args(repo, **extra))
     assert result["command"] == build_command("Add a health endpoint", repo, **extra)
+
+
+def test_run_build_command_pinned(repo):
+    # baro_run dispatches exactly the pinned command from core.command, never a
+    # bare or floating package spec.
+    bridge = FakeBridge()
+    result = tools.handle_baro_run(bridge, goal_args(repo))
+    argv = shlex.split(result["command"])
+    assert argv[1:4] == ["--yes", BARO_SPEC, "--headless"]
+    assert BARO_SPEC.endswith("@" + BARO_VERSION)
+    assert re.fullmatch(r"\d+\.\d+\.\d+", BARO_VERSION)
+    assert [c[1] for c in bridge.calls_named("start_background")] == [result["command"]]
+
+
+def test_run_and_status_persist_through_store(load_fixture, repo):
+    # Every value written through RunRepository is plain JSON, and the stored
+    # board round-trips through Board.from_dict.
+    lines = load_fixture("run_success.jsonl")
+    bridge = FakeBridge(chunks_by_line(lines), exit_at_end=True)
+    run_id = start_run(bridge, repo)
+    sync_all(bridge, run_id)
+    assert bridge.memory.get("runs") == [run_id]
+    for key in ("runs", board_key(run_id), handle_key(run_id)):
+        value = bridge.memory.get(key)
+        assert json.loads(json.dumps(value)) == value
+    stored = bridge.memory.get(board_key(run_id))
+    assert stored["status"] == "completed"
+    assert Board.from_dict(stored).to_dict() == stored
+    assert bridge.memory.get(handle_key(run_id))["read_offset"] == len(stdout_of(lines))
 
 
 def test_run_unattended_returns_error_without_start(repo):
