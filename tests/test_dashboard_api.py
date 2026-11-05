@@ -3,12 +3,13 @@
 The module is loaded the way Hermes loads it (hermes_cli/web_server_dashboard.py:1226-1235:
 a top-level module from its file path). FastAPI is not a test dependency. When it is not
 installed, a minimal stand-in exposing APIRouter, Depends and HTTPException is used, and the
-route functions are called directly with an in-memory store. When FastAPI and httpx are
-installed, the routes are also exercised over HTTP with the store dependency overridden.
+route functions are called directly with an in-memory store. When FastAPI and its test
+client are installed, the routes are also exercised over HTTP with the store dependency overridden.
 """
 
 import importlib.util
 import sys
+import re
 import types
 from pathlib import Path
 
@@ -58,9 +59,13 @@ def _has_real_fastapi() -> bool:
     return True
 
 
+# Decided at collection, before any test installs the stand-in under sys.modules['fastapi'].
+REAL_FASTAPI = _has_real_fastapi()
+
+
 @pytest.fixture
 def api(monkeypatch):
-    if not _has_real_fastapi():
+    if not REAL_FASTAPI:
         monkeypatch.setitem(sys.modules, "fastapi", _fastapi_stub())
     for name in (MODULE, CORE_MODULE, CORE_MODULE + ".ids", CORE_MODULE + ".store",
                  CORE_MODULE + ".board", CORE_MODULE + ".events"):
@@ -159,12 +164,47 @@ def test_invalid_run_id_is_404_without_touching_the_store(api, run_id):
     assert _status(exc_info) == 404
 
 
+PANEL_FILE = ROOT / "desktop" / "plugin.js"
+
+
+def test_panel_header_comment_declares_the_shapes_served(api, populated_store):
+    """The responses match the contract in desktop/plugin.js's header comment and its parsers."""
+    panel = PANEL_FILE.read_text(encoding="utf-8")
+    # Header comment (desktop/plugin.js:26-27): the two calls and their response shapes.
+    assert "//     GET /runs        -> { runs: [run_id, ...] }  (storage key `runs`, oldest first)" in panel
+    assert "//     GET /runs/<id>   -> { board: Board.to_dict() }  (storage key `run:<id>`)" in panel
+    # The paths the panel actually calls through ctx.rest.
+    assert ".rest('/runs')" in panel
+    assert ".rest('/runs/' + encodeURIComponent(runId)" in panel
+    # What its parsers read: payload.runs (a list of strings) and payload.board.stories (a list).
+    assert "Array.isArray(payload.runs) ? payload.runs" in panel
+    assert "payload.board && typeof payload.board === 'object' ? payload.board" in panel
+    assert "Array.isArray(board.stories) ? board : null" in panel
+
+    runs = api.list_runs(store=populated_store)
+    assert set(runs) == {"runs"}
+    assert runs["runs"] == [OLD_RUN, NEW_RUN]  # oldest first: the panel picks ids[ids.length - 1]
+    assert all(isinstance(run_id, str) and run_id for run_id in runs["runs"])
+
+    for run_id in runs["runs"]:
+        # Only characters encodeURIComponent leaves unchanged, so the panel's path is /runs/<run_id>.
+        assert re.fullmatch(r"[A-Za-z0-9\-_.!~*'()]+", run_id)
+        payload = api.get_run(run_id, store=populated_store)
+        assert set(payload) == {"board"}
+        assert isinstance(payload["board"], dict)
+        assert isinstance(payload["board"]["stories"], list) and payload["board"]["stories"]
+        assert payload["board"] == Board.from_dict(populated_store.get(f"run:{run_id}")).to_dict()
+
+
 def test_routes_over_http_when_fastapi_is_installed(api, populated_store):
-    if not _has_real_fastapi():
+    if not REAL_FASTAPI:
         pytest.skip("fastapi is not installed; the routes are covered by direct calls above")
-    pytest.importorskip("httpx")
     from fastapi import FastAPI
-    from fastapi.testclient import TestClient
+
+    try:
+        from fastapi.testclient import TestClient
+    except ImportError as exc:  # the test client needs an optional HTTP library
+        pytest.skip(f"fastapi test client unavailable: {exc}")
 
     app = FastAPI()
     app.include_router(api.router, prefix="/api/plugins/baro")
