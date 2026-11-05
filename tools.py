@@ -1,0 +1,478 @@
+"""Tool schemas and handlers for the ``baro`` toolset (ADR-010).
+
+Handlers are ``handle_<name>(bridge, args) -> dict``. ``__init__.py`` adapts
+them to Hermes's handler signature. The guide requires ``def handler(args,
+**kwargs) -> str`` returning JSON and never raising
+(reference-hermes-agent/website/docs/developer-guide/plugins/index.md:885-892).
+Schemas use the guide's ``{name, description, parameters}`` shape (index.md:748-767).
+
+``bridge`` is the only route to Hermes. It exposes:
+
+- ``is_unattended() -> bool``
+- ``start_background(command, cwd) -> {"process_id": str}``. It goes through
+  Hermes's gated tool pipeline and raises ApprovalDenied or DispatchError.
+- ``read_output(process_id, offset) -> (text, new_offset, exited)``. ``offset``
+  counts characters of the process's cumulative output, so
+  ``new_offset == offset + len(text)``.
+- ``kill(process_id) -> None``, which kills the process tree.
+- ``store() -> BoardStore``
+
+Every failure is ``{"ok": False, "error": <code>, "message": str}``.
+Unattended contexts (cron, messaging gateway) cannot answer an approval
+prompt. So baro_plan, baro_run and baro_cancel refuse there before any
+dispatch. baro_status only reads, so it stays allowed.
+"""
+
+from __future__ import annotations
+
+import re
+import time
+from datetime import datetime, timezone
+from typing import Any
+
+from .core.board import TERMINAL_STATUSES, Board
+from .core.command import BARO_VERSION, PLAN_ONLY_FLAG, build_command, validate_args
+from .core.events import BaroEvent, LineBuffer, parse_line
+from .core.ids import RUN_ID_RE, new_run_id
+from .core.store import RunRepository
+
+# Error codes (ADR-010).
+INVALID_ARGUMENT = "invalid_argument"
+UNATTENDED_CONTEXT = "unattended_context"
+APPROVAL_DENIED = "approval_denied"
+DISPATCH_FAILED = "dispatch_failed"
+UNKNOWN_RUN = "unknown_run"
+PLAN_TIMEOUT = "plan_timeout"
+ERROR_CODES = (
+    INVALID_ARGUMENT,
+    UNATTENDED_CONTEXT,
+    APPROVAL_DENIED,
+    DISPATCH_FAILED,
+    UNKNOWN_RUN,
+    PLAN_TIMEOUT,
+)
+
+PLAN_TIMEOUT_SECS = 600.0
+PLAN_POLL_SECS = 0.5
+MAX_OPTION_CHARS = 2000
+
+# Injectable clock and sleep. Tests monkeypatch these module attributes.
+_monotonic = time.monotonic
+_sleep = time.sleep
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class ApprovalDenied(Exception):
+    """The user (or Hermes policy) declined the gated command."""
+
+
+class DispatchError(Exception):
+    """Hermes could not run the dispatched tool call."""
+
+
+def error(code: str, message: str) -> dict:
+    if code not in ERROR_CODES:
+        raise ValueError(f"unknown error code {code!r}")
+    return {"ok": False, "error": code, "message": message}
+
+
+_UNATTENDED_MESSAGE = (
+    "{tool} needs an interactive Hermes session: it runs a command that Hermes "
+    "must ask you to approve, and this context (cron job or messaging gateway) "
+    "cannot show an approval prompt. Run it from an interactive session."
+)
+
+# ---------------------------------------------------------------- schemas
+
+_GOAL_REPO_PROPS = {
+    "goal": {
+        "type": "string",
+        "description": "The software goal for Baro, in plain language.",
+    },
+    "repo": {
+        "type": "string",
+        "description": "Absolute path of an existing directory: the repository Baro works in.",
+    },
+    "llm": {
+        "type": "string",
+        "description": "Optional Baro --llm backend (e.g. 'openai'). Omit to use Baro's configured backend.",
+    },
+    "openai_base_url": {
+        "type": "string",
+        "description": "Optional Baro --openai-base-url for an OpenAI-compatible endpoint.",
+    },
+    "model": {
+        "type": "string",
+        "description": "Optional Baro --model name.",
+    },
+}
+
+_RUN_ID_PROPS = {
+    "run_id": {
+        "type": "string",
+        "description": "Run id returned by baro_run, e.g. 'baro-20261105T142233Z-a1b2c3'.",
+    },
+}
+
+TOOL_SCHEMAS: dict[str, dict] = {
+    "baro_plan": {
+        "name": "baro_plan",
+        "description": (
+            "Ask Baro to plan a software goal in a repository and return the plan "
+            "as stories with dependency edges, without executing any story. Baro "
+            "is stopped as soon as the plan is known."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": dict(_GOAL_REPO_PROPS),
+            "required": ["goal", "repo"],
+        },
+    },
+    "baro_run": {
+        "name": "baro_run",
+        "description": (
+            "Start a Baro run for a software goal in a repository, as a background "
+            "process. Coding agents then execute shell commands in that repository. "
+            "Returns a run id immediately; follow progress with baro_status."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": dict(_GOAL_REPO_PROPS),
+            "required": ["goal", "repo"],
+        },
+    },
+    "baro_status": {
+        "name": "baro_status",
+        "description": (
+            "Return the live board of a Baro run: every story with its state "
+            "(blocked, ready, running, done, failed), what it waits on, what it "
+            "blocks, and the replans so far."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": dict(_RUN_ID_PROPS),
+            "required": ["run_id"],
+        },
+    },
+    "baro_cancel": {
+        "name": "baro_cancel",
+        "description": "Stop a Baro run and its whole process tree.",
+        "parameters": {
+            "type": "object",
+            "properties": dict(_RUN_ID_PROPS),
+            "required": ["run_id"],
+        },
+    },
+}
+
+# ------------------------------------------------------------- validation
+
+
+def _goal_args(args: Any) -> tuple[dict | None, dict | None]:
+    """Return (validated values, None) or (None, error)."""
+    if not isinstance(args, dict):
+        return None, error(INVALID_ARGUMENT, "arguments must be an object")
+    goal, repo = args.get("goal"), args.get("repo")
+    try:
+        validate_args(goal, repo)
+    except ValueError as exc:
+        return None, error(INVALID_ARGUMENT, str(exc))
+    values = {"goal": goal, "repo": repo}
+    for name in ("llm", "openai_base_url", "model"):
+        value = args.get(name)
+        if value is None or value == "":
+            values[name] = None
+            continue
+        if not isinstance(value, str):
+            return None, error(INVALID_ARGUMENT, f"{name} must be a string")
+        if "\x00" in value or len(value) > MAX_OPTION_CHARS:
+            return None, error(
+                INVALID_ARGUMENT,
+                f"{name} must have no NUL and at most {MAX_OPTION_CHARS} characters",
+            )
+        if value.startswith("-"):
+            return None, error(INVALID_ARGUMENT, f"{name} must not start with '-'")
+        values[name] = value
+    return values, None
+
+
+def _run_id_arg(args: Any) -> tuple[str | None, dict | None]:
+    run_id = args.get("run_id") if isinstance(args, dict) else None
+    if not isinstance(run_id, str) or not re.fullmatch(RUN_ID_RE, run_id):
+        return None, error(
+            INVALID_ARGUMENT,
+            "run_id must look like 'baro-YYYYMMDDTHHMMSSZ-xxxxxx' (as returned by baro_run)",
+        )
+    return run_id, None
+
+
+def _command(values: dict, *, plan_only: bool = False) -> str:
+    return build_command(
+        values["goal"],
+        values["repo"],
+        llm=values["llm"],
+        openai_base_url=values["openai_base_url"],
+        model=values["model"],
+        plan_only=plan_only,
+    )
+
+
+# --------------------------------------------------------------- dispatch
+
+
+def _start(bridge: Any, command: str, cwd: str) -> tuple[str | None, dict | None]:
+    """Start the command through the bridge. Return (process_id, None) or (None, error)."""
+    try:
+        handle = bridge.start_background(command, cwd)
+    except ApprovalDenied as exc:
+        return None, error(APPROVAL_DENIED, f"Starting Baro was not approved: {exc}")
+    except DispatchError as exc:
+        return None, error(DISPATCH_FAILED, f"Could not start Baro: {exc}")
+    process_id = handle.get("process_id") if isinstance(handle, dict) else None
+    if not isinstance(process_id, str) or not process_id:
+        return None, error(DISPATCH_FAILED, "Hermes did not return a process id for Baro")
+    return process_id, None
+
+
+def _kill(bridge: Any, process_id: str) -> dict | None:
+    """Kill the process tree. Return None on success, else an error."""
+    try:
+        bridge.kill(process_id)
+    except ApprovalDenied as exc:
+        return error(
+            APPROVAL_DENIED,
+            f"Stopping Baro process {process_id} was not approved, so it may still be running: {exc}",
+        )
+    except DispatchError as exc:
+        return error(
+            DISPATCH_FAILED,
+            f"Could not stop Baro process {process_id}, so it may still be running: {exc}",
+        )
+    return None
+
+
+def _read(bridge: Any, process_id: str, offset: int) -> tuple[str, int, bool]:
+    text, new_offset, exited = bridge.read_output(process_id, offset)
+    return (text or ""), int(new_offset), bool(exited)
+
+
+# --------------------------------------------------------------- baro_plan
+
+
+def _plan_result(values: dict, plan: BaroEvent) -> dict:
+    return {
+        "ok": True,
+        "goal": values["goal"],
+        "repo": values["repo"],
+        "baro_version": BARO_VERSION,
+        "stories": [
+            {"id": s.id, "title": s.title, "depends_on": list(s.depends_on)} for s in plan.stories
+        ],
+        "edges": [{"from": dep, "to": s.id} for s in plan.stories for dep in s.depends_on],
+        "native_plan_only": PLAN_ONLY_FLAG is not None,
+        "stories_started": 0,
+    }
+
+
+def _execution_began(story_id: str | None) -> str:
+    return (
+        f"Baro began executing story {story_id or '?'} before the plan could be "
+        "returned; the process was stopped. No plan is reported."
+    )
+
+
+def handle_baro_plan(bridge: Any, args: dict) -> dict:
+    """Return Baro's plan without executing stories.
+
+    Baro has no plan-only flag (core/command.py). With ``--headless`` it
+    confirms the plan and goes on to execute it. So the handler reads output
+    until the first plan event and kills the process at once. It stops
+    consuming at the plan: lines after it, even in the same read, are never
+    parsed, so no ``story_start`` is consumed and ``stories_started`` is 0. A
+    ``story_start`` *before* any plan means execution began: that is an
+    error, never a silent success.
+    """
+    if bridge.is_unattended():
+        return error(UNATTENDED_CONTEXT, _UNATTENDED_MESSAGE.format(tool="baro_plan"))
+    values, err = _goal_args(args)
+    if err:
+        return err
+    native = PLAN_ONLY_FLAG is not None
+    started_at = _monotonic()
+    process_id, err = _start(bridge, _command(values, plan_only=native), values["repo"])
+    if err:
+        return err
+
+    def stop(result: dict, exited: bool) -> dict:
+        if exited:
+            return result
+        kill_err = _kill(bridge, process_id)
+        return kill_err or result
+
+    buffer = LineBuffer()
+    offset = 0
+    plan: BaroEvent | None = None
+    while True:
+        try:
+            text, offset, exited = _read(bridge, process_id, offset)
+        except Exception as exc:  # DispatchError or a malformed bridge reply
+            return stop(error(DISPATCH_FAILED, f"Could not read Baro output: {exc}"), False)
+        lines = buffer.feed(text)
+        if exited:
+            lines += buffer.flush()
+        for line in lines:
+            event = parse_line(line)
+            if event is None:
+                continue
+            if event.kind == "story_start":
+                return stop(error(DISPATCH_FAILED, _execution_began(event.story_id)), exited)
+            if event.kind == "plan" and plan is None:
+                plan = event
+                if not native:
+                    # Stop consuming here: lines after the plan, even in this
+                    # same read, are never parsed. Kill the process at once.
+                    return stop(_plan_result(values, plan), exited)
+        if exited:
+            if plan is not None:
+                return _plan_result(values, plan)
+            return error(DISPATCH_FAILED, "Baro exited before it reported a plan")
+        if _monotonic() - started_at >= PLAN_TIMEOUT_SECS:
+            return stop(
+                error(
+                    PLAN_TIMEOUT,
+                    f"Baro reported no plan within {int(PLAN_TIMEOUT_SECS)} seconds; "
+                    "the process was stopped",
+                ),
+                False,
+            )
+        if not text:
+            _sleep(PLAN_POLL_SECS)
+
+
+# ---------------------------------------------------------------- baro_run
+
+
+def handle_baro_run(bridge: Any, args: dict) -> dict:
+    """Start Baro in the background and return a run id at once (no output is read)."""
+    if bridge.is_unattended():
+        return error(UNATTENDED_CONTEXT, _UNATTENDED_MESSAGE.format(tool="baro_run"))
+    values, err = _goal_args(args)
+    if err:
+        return err
+    command = _command(values)
+    process_id, err = _start(bridge, command, values["repo"])
+    if err:
+        return err
+    run_id = new_run_id()
+    board = Board(
+        run_id=run_id,
+        goal=values["goal"],
+        repo=values["repo"],
+        baro_version=BARO_VERSION,
+        status="running",
+        started_at=_now(),
+    )
+    runs = RunRepository(bridge.store())
+    runs.save_board(board)
+    runs.save_handle(run_id, {"process_id": process_id, "read_offset": 0})
+    return {
+        "ok": True,
+        "run_id": run_id,
+        "status": "running",
+        "baro_version": BARO_VERSION,
+        "command": command,
+    }
+
+
+# ------------------------------------------------------------- baro_status
+
+
+def _load(runs: RunRepository, run_id: str) -> tuple[Board | None, dict | None, dict | None]:
+    board = runs.load_board(run_id)
+    handle = runs.load_handle(run_id)
+    if board is None or handle is None:
+        return None, None, error(UNKNOWN_RUN, f"No Baro run with id {run_id}")
+    return board, handle, None
+
+
+def handle_baro_status(bridge: Any, args: dict) -> dict:
+    """Read new output since the stored offset, apply it to the board and save both.
+
+    The stored offset moves only past complete lines, so a line split across
+    reads is read again, whole, on the next call. If the process exited
+    without Baro's run-end event, the run is marked failed.
+    """
+    run_id, err = _run_id_arg(args)
+    if err:
+        return err
+    runs = RunRepository(bridge.store())
+    board, handle, err = _load(runs, run_id)
+    if err:
+        return err
+    if board.status in TERMINAL_STATUSES:
+        return {"ok": True, "board": board.to_dict()}
+
+    offset = handle.get("read_offset", 0)
+    try:
+        text, new_offset, exited = _read(bridge, handle["process_id"], offset)
+    except Exception as exc:  # DispatchError or a malformed bridge reply
+        return error(DISPATCH_FAILED, f"Could not read Baro output for {run_id}: {exc}")
+
+    at = _now()
+    cut = text.rfind("\n") + 1
+    complete, remainder = text[:cut], text[cut:]
+    lines = LineBuffer().feed(complete)
+    if exited:
+        # The process is gone, so an unterminated last line is complete.
+        if remainder:
+            lines.append(remainder.rstrip("\r"))
+        remainder = ""
+    for line in lines:
+        board.apply_line(line, at=at)
+    if exited and board.status not in TERMINAL_STATUSES:
+        board.apply(BaroEvent(kind="run_end", raw={}, outcome="failed"), at=at)
+
+    runs.save_board(board)
+    runs.save_handle(
+        run_id,
+        {"process_id": handle["process_id"], "read_offset": max(offset, new_offset - len(remainder))},
+    )
+    return {"ok": True, "board": board.to_dict()}
+
+
+# ------------------------------------------------------------- baro_cancel
+
+
+def handle_baro_cancel(bridge: Any, args: dict) -> dict:
+    """Kill a live run's process tree and mark the board cancelled.
+
+    A run that already ended is left alone: no kill, existing status returned.
+    """
+    if bridge.is_unattended():
+        return error(UNATTENDED_CONTEXT, _UNATTENDED_MESSAGE.format(tool="baro_cancel"))
+    run_id, err = _run_id_arg(args)
+    if err:
+        return err
+    runs = RunRepository(bridge.store())
+    board, handle, err = _load(runs, run_id)
+    if err:
+        return err
+    if board.status in TERMINAL_STATUSES:
+        return {"ok": True, "run_id": run_id, "status": board.status, "already_finished": True}
+    kill_err = _kill(bridge, handle["process_id"])
+    if kill_err:
+        return kill_err
+    board.mark_cancelled(at=_now())
+    runs.save_board(board)
+    return {"ok": True, "run_id": run_id, "status": "cancelled", "already_finished": False}
+
+
+HANDLERS = {
+    "baro_plan": handle_baro_plan,
+    "baro_run": handle_baro_run,
+    "baro_status": handle_baro_status,
+    "baro_cancel": handle_baro_cancel,
+}
