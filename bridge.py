@@ -23,7 +23,9 @@ Every Hermes contract used here was read from the reference checkout first
   tools/terminal_tool.py:1624-1637, and its approval guard runs before any spawn,
   at tools/terminal_tool.py:1562 and :1114-1138.
 - Process output and kill. These go through the ``process_manage`` tool
-  (tools/process_registry.py:2567-2612, :2747), dispatched the same way.
+  (tools/process_registry.py:2567-2612, :2747), dispatched the same way. That
+  kill does not signal a process group, so ``kill`` also dispatches
+  ``pkill -TERM -P <pid>`` and ``kill -TERM <pid>`` through ``terminal`` (see kill).
 - Storage. ``ctx.state`` is described in developer-guide/plugins/index.md:935
   and :972-985, and implemented at hermes_cli/plugins.py:282-285.
 - Unattended contexts. developer-guide/plugins/index.md:1936-1938 gives
@@ -204,29 +206,70 @@ class HermesBridge:
         return end  # rolled past everything seen: what is left is all new
 
     def kill(self, process_id: str) -> None:
-        """Kill the background process and its whole tree via ``process_manage`` action ``kill``.
+        """Kill the background process and its whole tree, using only dispatched Hermes tools.
 
-        Process-tree termination happens in Hermes, cited here:
-        - The process starts in its own session (tools/process_registry.py:1221-1225,
-          ``start_new_session``).
-        - Kill takes a snapshot of every descendant, SIGTERMs the root, and then
-          SIGTERMs and SIGKILLs the survivors
-          (tools/process_registry_termination.py:33-42, called from
-          tools/process_registry.py:2241-2244). It also stops the systemd scope that
-          holds double-forked descendants (:2160-2162).
-        - It then checks that no process in the tree survived, and reports
-          "Kill incomplete" if any did (tools/process_registry.py:2163-2198,
-          tools/process_registry_termination.py:149-161).
-        Any error status is raised, so baro_cancel never reports a live tree as stopped.
-        "already_exited" counts as success: the kill still stops the scope's survivors
-        (tools/process_registry.py:2136-2155).
+        Hermes's ``process_manage`` action ``kill`` does not signal a process group.
+        On the local backend it snapshots the descendants, SIGTERMs the root, then
+        SIGTERMs and SIGKILLs the survivors (tools/process_registry_termination.py:33-42,
+        called from tools/process_registry.py:2241-2244). On every other terminal
+        backend it runs ``kill <pid>`` on the root alone (tools/process_registry.py:2245-2246),
+        so child agent processes could survive. ADR-009's fallback therefore always
+        runs too, through the same gated ``terminal`` tool as the Baro command:
+
+        1. ``process_manage`` ``poll`` reads the root's ``pid`` (tools/process_registry.py:2003).
+        2. ``pkill -TERM -P <pid>`` signals the root's children while the root is still
+           alive. Running it before step 3 matters: Hermes's local tree kill refuses to
+           act on a dead root pid (tools/process_registry_termination.py, the
+           ``_host_pid_is_ours`` guard of ``_terminate_host_pid``).
+        3. ``process_manage`` ``kill`` runs Hermes's own kill. It also stops the systemd
+           scope (tools/process_registry.py:2160-2162) and reports "Kill incomplete" if
+           the tree survived (:2163-2198). "already_exited" counts as success (:2136-2155).
+        4. ``kill -TERM <pid>`` signals the root, for backends where step 3 could not.
+
+        Steps 2 and 4 run only while poll reports the process running, so an exited,
+        possibly recycled pid is never signalled. A foreground terminal reply is
+        ``{output, exit_code, error}`` (tools/terminal_tool_result.py:259). A non-zero
+        exit code, for example pkill finding no children, is not a failure. A refused
+        approval, or any error, is raised after Hermes's own kill has still been tried,
+        so baro_cancel never reports a live tree as stopped.
         """
+        pid = self._running_pid(process_id)
+        failures: list[Exception] = []
+        if pid is not None:
+            self._signal(f"pkill -TERM -P {pid}", failures)
         reply = self._dispatch("process_manage", {"action": "kill", "session_id": process_id})
         status = reply.get("status")
         if status in _NOT_APPROVED:
-            raise ApprovalDenied(str(reply.get("error") or "Hermes did not run the kill"))
-        if status in ("error", "not_found") or reply.get("error"):
-            raise DispatchError(str(reply.get("error") or f"kill of {process_id} failed ({status})"))
+            failures.append(ApprovalDenied(str(reply.get("error") or "Hermes did not run the kill")))
+        elif status in ("error", "not_found") or reply.get("error"):
+            failures.append(DispatchError(str(reply.get("error") or f"kill of {process_id} failed ({status})")))
+        if pid is not None:
+            self._signal(f"kill -TERM {pid}", failures)
+        if failures:
+            raise failures[0]
+
+    def _running_pid(self, process_id: str) -> int | None:
+        """The root pid from ``process_manage`` ``poll``, or None if it exited or is unknown."""
+        try:
+            reply = self._dispatch("process_manage", {"action": "poll", "session_id": process_id})
+        except DispatchError:
+            return None  # the kill below reports the failure
+        pid = reply.get("pid")
+        if reply.get("status") != "running" or isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1:
+            return None
+        return pid
+
+    def _signal(self, command: str, failures: list[Exception]) -> None:
+        """Run a signal command through the gated ``terminal`` tool, recording a failure."""
+        try:
+            reply = self._dispatch("terminal", {"command": command})
+        except DispatchError as exc:
+            failures.append(exc)
+            return
+        if reply.get("status") in _NOT_APPROVED:
+            failures.append(ApprovalDenied(str(reply.get("error") or f"Hermes did not run {command!r}")))
+        elif reply.get("error"):
+            failures.append(DispatchError(f"{command!r} failed: {reply.get('error')}"))
 
 
 class PluginStateStore:

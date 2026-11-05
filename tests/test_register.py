@@ -125,15 +125,49 @@ def test_start_background_maps_other_failures_to_dispatch_error():
             HermesBridge(FakeCtx(replies=[reply])).start_background("echo hi", "/tmp/repo")
 
 
-def test_kill_uses_process_manage_kill_and_raises_on_incomplete_kill():
-    ctx = FakeCtx(replies=[{"status": "killed", "session_id": "proc_ab12"}])
-    HermesBridge(ctx).kill("proc_ab12")
-    assert ctx.dispatched == [("process_manage", {"action": "kill", "session_id": "proc_ab12"})]
+POLL = ("process_manage", {"action": "poll", "session_id": "proc_ab12"})
+PM_KILL = ("process_manage", {"action": "kill", "session_id": "proc_ab12"})
+PKILL = ("terminal", {"command": "pkill -TERM -P 4242"})
+KILL_ROOT = ("terminal", {"command": "kill -TERM 4242"})
 
-    HermesBridge(FakeCtx(replies=[{"status": "already_exited", "exit_code": 0}])).kill("proc_ab12")
+
+def _poll(status="running", pid=4242):
+    return {"session_id": "proc_ab12", "command": "x", "status": status, "pid": pid}
+
+
+def _term(exit_code=0):
+    return {"output": "", "exit_code": exit_code, "error": None}
+
+
+def test_kill_signals_children_then_hermes_kill_then_root_through_dispatch():
+    # pkill exits 1 when the root has no children: that is not a failure.
+    ctx = FakeCtx(replies=[_poll(), _term(1), {"status": "killed", "session_id": "proc_ab12"}, _term(1)])
+    HermesBridge(ctx).kill("proc_ab12")
+    assert ctx.dispatched == [POLL, PKILL, PM_KILL, KILL_ROOT]
+
+
+@pytest.mark.parametrize("poll", [_poll(status="exited"), _poll(pid=None), _poll(pid=True), _poll(pid=1),
+                                  {"status": "not_found", "error": "No process with ID proc_ab12"}])
+def test_kill_never_signals_an_exited_or_unknown_pid(poll):
+    ctx = FakeCtx(replies=[poll, {"status": "already_exited", "exit_code": 0}])
+    HermesBridge(ctx).kill("proc_ab12")
+    assert ctx.dispatched == [POLL, PM_KILL]
+
+
+def test_kill_raises_on_incomplete_kill_after_signalling_the_root():
     incomplete = {"status": "error", "error": "Kill incomplete: 1 process(es) still alive (77); session running"}
+    ctx = FakeCtx(replies=[_poll(), _term(), incomplete, _term()])
     with pytest.raises(DispatchError, match="Kill incomplete"):
-        HermesBridge(FakeCtx(replies=[incomplete])).kill("proc_ab12")
+        HermesBridge(ctx).kill("proc_ab12")
+    assert ctx.dispatched == [POLL, PKILL, PM_KILL, KILL_ROOT]
+
+
+def test_kill_refused_signal_raises_approval_denied_but_hermes_kill_still_runs():
+    refused = {"output": "", "exit_code": 1, "error": "denied by user", "status": "blocked"}
+    ctx = FakeCtx(replies=[_poll(), refused, {"status": "killed"}, _term()])
+    with pytest.raises(ApprovalDenied, match="denied by user"):
+        HermesBridge(ctx).kill("proc_ab12")
+    assert ctx.dispatched == [POLL, PKILL, PM_KILL, KILL_ROOT]
 
 
 # --------------------------------------------------------------- read_output
