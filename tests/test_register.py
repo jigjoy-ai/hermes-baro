@@ -73,6 +73,16 @@ def test_register_records_exactly_four_tools_in_toolset_baro():
     assert ctx.dispatched == []  # register() dispatches nothing and builds no bridge
 
 
+def test_package_entry_point_delegates_to_bridge_register():
+    # Hermes calls the package's register(ctx) (__init__.py), which must register the same tools.
+    ctx = FakeCtx()
+    assert baro_plugin.register(ctx) is None
+    assert [(t["name"], t["toolset"]) for t in ctx.tools] == [
+        ("baro_plan", "baro"), ("baro_run", "baro"), ("baro_status", "baro"), ("baro_cancel", "baro"),
+    ]
+    assert ctx.dispatched == []
+
+
 def test_loading_the_plugin_imports_no_hermes_module():
     assert baro_plugin.bridge is bridge_mod
     assert [m for m in sys.modules if m.startswith("hermes")] == []
