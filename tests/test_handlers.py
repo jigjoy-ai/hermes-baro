@@ -149,15 +149,37 @@ def test_plan_story_start_seen_before_plan(load_fixture, repo, clock):
     assert bridge.calls_named("kill") == [("kill", "proc-1")]
 
 
-def test_plan_story_start_seen_in_same_read_after_plan(load_fixture, repo, clock):
-    # The whole stream arrives in one read: the plan and, right after it, a
-    # story_start. Execution began, so no plan is reported as a success.
-    bridge = FakeBridge([stdout_of(load_fixture("plan_only.jsonl"))])
+def test_plan_kills_after_first_plan_event_ignores_later_lines_in_same_read(
+    load_fixture, repo, clock, monkeypatch
+):
+    # The whole stream arrives in one read: the plan, then dag, story_start,
+    # routed and activity. The handler stops consuming at the plan: it kills
+    # Baro at once and reports the plan, and the later story_start is never
+    # consumed.
+    lines = load_fixture("plan_only.jsonl")
+    assert any('"story_start"' in line for line in lines[2:])
+    bridge = FakeBridge([stdout_of(lines)])
+    consumed = []
+    real_parse = tools.parse_line
+
+    def recording_parse(line):
+        consumed.append(line)
+        return real_parse(line)
+
+    monkeypatch.setattr(tools, "parse_line", recording_parse)
     result = tools.handle_baro_plan(bridge, goal_args(repo))
-    assert result["ok"] is False
-    assert result["error"] == "dispatch_failed"
-    assert "began executing story S1" in result["message"]
-    assert bridge.calls_named("kill") == [("kill", "proc-1")]
+    assert result["ok"] is True, result
+    assert result["stories_started"] == 0
+    assert [s["id"] for s in result["stories"]] == ["S1", "S2"]
+    assert result["edges"] == [{"from": "S1", "to": "S2"}]
+    # Kill is immediate: exactly one read, then the kill, and nothing after.
+    assert bridge.dispatches == [
+        ("start_background", build_command("Add a health endpoint", repo), repo),
+        ("read_output", "proc-1", 0),
+        ("kill", "proc-1"),
+    ]
+    # Only the lines up to and including the plan (init) line were parsed.
+    assert consumed == lines[:2]
 
 
 def test_plan_timeout(load_fixture, repo, clock):

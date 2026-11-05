@@ -289,10 +289,11 @@ def handle_baro_plan(bridge: Any, args: dict) -> dict:
 
     Baro has no plan-only flag (core/command.py). With ``--headless`` it
     confirms the plan and goes on to execute it. So the handler reads output
-    until the first plan event and kills the process at once. It does not
-    consume any line after the plan. A ``story_start`` before the plan, or in
-    the same read just after it, means execution began: that is an error,
-    never a silent success.
+    until the first plan event and kills the process at once. It stops
+    consuming at the plan: lines after it, even in the same read, are never
+    parsed, so no ``story_start`` is consumed and ``stories_started`` is 0. A
+    ``story_start`` *before* any plan means execution began: that is an
+    error, never a silent success.
     """
     if bridge.is_unattended():
         return error(UNATTENDED_CONTEXT, _UNATTENDED_MESSAGE.format(tool="baro_plan"))
@@ -322,7 +323,7 @@ def handle_baro_plan(bridge: Any, args: dict) -> dict:
         lines = buffer.feed(text)
         if exited:
             lines += buffer.flush()
-        for i, line in enumerate(lines):
+        for line in lines:
             event = parse_line(line)
             if event is None:
                 continue
@@ -331,17 +332,9 @@ def handle_baro_plan(bridge: Any, args: dict) -> dict:
             if event.kind == "plan" and plan is None:
                 plan = event
                 if not native:
-                    # Kill first, then check the lines already received after
-                    # the plan (without applying them) for a story start.
-                    if not exited:
-                        kill_err = _kill(bridge, process_id)
-                        if kill_err:
-                            return kill_err
-                    for later in lines[i + 1 :]:
-                        later_event = parse_line(later)
-                        if later_event is not None and later_event.kind == "story_start":
-                            return error(DISPATCH_FAILED, _execution_began(later_event.story_id))
-                    return _plan_result(values, plan)
+                    # Stop consuming here: lines after the plan, even in this
+                    # same read, are never parsed. Kill the process at once.
+                    return stop(_plan_result(values, plan), exited)
         if exited:
             if plan is not None:
                 return _plan_result(values, plan)
