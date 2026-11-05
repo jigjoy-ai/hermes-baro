@@ -48,6 +48,9 @@ const { useState, useEffect, useCallback, useRef } = React
 const PLUGIN_ID = 'baro'
 const ROUTE_PATH = '/baro'
 const POLL_MS = 2000
+// PluginRestOptions.timeoutMs (desktop-plugin-sdk.md:2338-2340) bounds each read, so
+// a hung backend request settles as an error instead of staying pending forever.
+const REQUEST_TIMEOUT_MS = 10000
 const LIVE_STATUSES = ['planning', 'running']
 
 // Column order and the story.state each column holds (ADR-005 states).
@@ -232,10 +235,15 @@ function BaroBoardPage({ ctx }) {
   // Becomes false once the user picks a run, so a refresh no longer moves the
   // picker to the newest run.
   const followNewest = useRef(true)
-  // Only the latest board request may publish (selection changes and overlapping
-  // ticks must not let an older response overwrite a newer one).
+  // Every poll tick issues a fresh request, and a pending, slow or hung one never
+  // suppresses later ticks. Each request takes a sequence number. A response
+  // publishes only if it belongs to the run selected now and is newer than the
+  // last response published, so an older reply that arrives late cannot overwrite
+  // newer cards and a reply for a run that is no longer selected is dropped.
   const boardSeq = useRef(0)
-  const inFlight = useRef(false)
+  const publishedSeq = useRef(0)
+  const selectedRef = useRef(null)
+  selectedRef.current = selected
 
   const loadRuns = useCallback(() => {
     return ctx
@@ -257,20 +265,19 @@ function BaroBoardPage({ ctx }) {
     runId => {
       if (!runId) return Promise.resolve()
       const seq = ++boardSeq.current
-      inFlight.current = true
+      const mayPublish = () => runId === selectedRef.current && seq > publishedSeq.current
       return ctx
-        .rest('/runs/' + encodeURIComponent(runId))
+        .rest('/runs/' + encodeURIComponent(runId), { timeoutMs: REQUEST_TIMEOUT_MS })
         .then(payload => {
-          if (seq !== boardSeq.current) return
+          if (!mayPublish()) return
+          publishedSeq.current = seq
           setBoard(normaliseBoard(payload))
           setError(null)
         })
         .catch(err => {
-          if (seq !== boardSeq.current) return
+          if (!mayPublish()) return
+          publishedSeq.current = seq
           setError('Could not load run ' + runId + ': ' + errorText(err))
-        })
-        .then(() => {
-          if (seq === boardSeq.current) inFlight.current = false
         })
     },
     [ctx]
@@ -295,8 +302,9 @@ function BaroBoardPage({ ctx }) {
   const live = Boolean(selected) && boardRunId === selected && isLiveStatus(status)
   useEffect(() => {
     if (!live) return undefined
+    // Unconditional: every tick re-reads, even while an earlier request is pending.
     const dispose = ctx.setInterval(() => {
-      if (!inFlight.current) loadBoard(selected)
+      loadBoard(selected)
     }, POLL_MS)
     return dispose
   }, [live, selected, ctx, loadBoard])
