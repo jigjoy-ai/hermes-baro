@@ -1,0 +1,49 @@
+# Draft Hermes plugin catalog entry for this plugin (ADR-014). It is NOT submitted.
+# At submission this file is added as plugin-catalog/baro.yaml in a PR to
+# NousResearch/hermes-agent (website/docs/developer-guide/plugins/catalog-submission.md:50-55).
+#
+# Sources (paths relative to reference-hermes-agent/):
+# - Keys: the entry schema at plugin-catalog/README.md:178-209. Every key below
+#   is a schema key, in schema order, and none is left out.
+# - name [a-z0-9_-]{1,64}, repo https:// only, sha a full 40-hex commit:
+#   plugin-catalog/README.md:181-183 and rule 2 (README.md:17-19). The loader
+#   enforces the same at hermes_cli/plugin_catalog.py:135-150.
+# - Quote version: catalog-submission.md:55 and README.md:195.
+# - requires_hermes must match plugin.yaml: rule 14 (README.md:120-131) and
+#   README.md:193.
+# - capabilities must match what register() registers: rule 6 (README.md:39-42)
+#   and developer-guide/plugins/index.md:370-372. That is the four tools of
+#   toolset "baro", the same list as plugin.yaml provides_tools.
+# - tier community: only Nous maintainers set official or verified (README.md:211-216).
+# - The schema has no licence key. The licence is MIT (LICENSE, and plugin.yaml license: MIT).
+# - description carries the rule 13 disclosures (README.md:114-119), in the
+#   same style as the listed entries.
+name: baro
+# PLACEHOLDER — replace with the real public https:// repository URL at submission.
+repo: https://github.com/PLACEHOLDER-OWNER/hermes-baro
+# PLACEHOLDER — fill with real commit sha at submission
+sha: "0000000000000000000000000000000000000000"
+subdir: ""
+description: "Hand a software goal to Baro and watch it run as a live, dependency-aware kanban: baro_plan returns the plan as stories with dependency edges, baro_run starts a run, baro_status shows each story as blocked, ready, running, done or failed with what it waits on and what it blocks, and baro_cancel stops the run and its process tree. Disclosure — baro_run starts one long-running background process per run (baro-ai@0.121.0 through npx, pinned exactly) via Hermes's terminal tool, so every start and stop goes through Hermes approval; Baro's coding agents execute shell commands in the target repository and make network calls to the model provider the user configured for Baro; boards are stored only in the plugin's own Hermes plugin state; the plugin reads no credentials and no files outside that state, has no telemetry, and refuses to start or stop runs under cron and the messaging gateway."
+maintainer: JigJoy
+tier: community
+category: tools
+requires_hermes: ">=0.22.7"
+docs_url: ""
+version: "0.1.0"
+image: ""
+screenshots: []
+readme: true
+platforms: []
+title: "Baro"
+onboarding: false
+known_issues: []
+capabilities:
+  provides_tools:
+    - baro_plan
+    - baro_run
+    - baro_status
+    - baro_cancel
+  provides_hooks: []
+  provides_middleware: []
+  requires_env: []
