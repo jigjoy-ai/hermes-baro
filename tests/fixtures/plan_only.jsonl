@@ -1,0 +1,6 @@
+{"type":"plan_ready","stories":2}
+{"type":"init","project":"baro","mode":"parallel","runner":"macbook","stories":[{"id":"S1","title":"First story"},{"id":"S2","title":"Second story","depends_on":["S1"]}]}
+{"type":"dag","levels":[[{"id":"S1"}],[{"id":"S2"}]]}
+{"type":"story_start","id":"S1","title":"First story"}
+{"type":"routed","id":"S1","backend":"claude","model":"opus"}
+{"type":"activity","id":"S1","kind":"tool_call","text":"cargo test","tool":"bash"}

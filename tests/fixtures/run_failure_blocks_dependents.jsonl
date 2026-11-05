@@ -1,0 +1,7 @@
+{"type":"init","protocol":3,"project":"p","stories":[{"id":"S1","title":"S1","depends_on":[]},{"id":"S2","title":"S2","depends_on":["S1"]},{"id":"S3","title":"S3","depends_on":["S2"]},{"id":"S4","title":"S4","depends_on":["S3"]}],"runner":"macbook"}
+{"type":"story_start","id":"S1","title":"S1"}
+{"type":"story_retry","id":"S1","attempt":1}
+{"type":"story_complete","id":"S1","duration_secs":12,"files_created":1,"files_modified":1}
+{"type":"story_start","id":"S2","title":"S2"}
+{"type":"story_error","id":"S2","error":"tests failed","attempt":3,"max_retries":3}
+{"type":"done","success":false,"abort_reason":"verification failed: npm test"}

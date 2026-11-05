@@ -1,0 +1,5 @@
+{"type":"init","protocol":3,"project":"demo","stories":[{"id":"S1"}]}
+garbage line
+{"type":"activity","text":"not a milestone"}
+{"type":"story_complete","id":"S1"}
+{"type":"done","success":true,"stats":{"stories_completed":1,"stories_skipped":0}}
