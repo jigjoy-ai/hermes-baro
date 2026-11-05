@@ -19,8 +19,7 @@
 # - description carries the rule 13 disclosures (README.md:114-119), in the
 #   same style as the listed entries.
 name: baro
-# PLACEHOLDER — replace with the real public https:// repository URL at submission.
-repo: https://github.com/PLACEHOLDER-OWNER/hermes-baro
+repo: https://github.com/jigjoy-ai/hermes-baro
 # PLACEHOLDER — fill with real commit sha at submission
 sha: "0000000000000000000000000000000000000000"
 subdir: ""

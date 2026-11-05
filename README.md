@@ -24,15 +24,15 @@ Hermes approval sees and gates each command.
 ## Install
 
 ```bash
-hermes plugins install <git-url>
+hermes plugins install https://github.com/jigjoy-ai/hermes-baro
 hermes plugins enable baro
 ```
 
 `<git-url>` is this repository's clone URL, for example
-`https://github.com/<owner>/hermes-baro`. Hermes asks `Enable 'baro' now? [y/N]`
+`https://github.com/jigjoy-ai/hermes-baro`. Hermes asks `Enable 'baro' now? [y/N]`
 after the install. Pass `--enable` or `--no-enable` to skip that question. For a
 reproducible install, pin a full commit with
-`hermes plugins install <git-url> --ref <40-hex-sha>`.
+`hermes plugins install https://github.com/jigjoy-ai/hermes-baro --ref <40-hex-sha>`.
 
 Requirements:
 
