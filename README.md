@@ -18,33 +18,39 @@ a board that you can follow live:
 - a Desktop kanban page (`desktop/plugin.js`), served by a small read-only
   backend (`dashboard/`).
 
-## Autonomous by design, safe in the harness
+## Autonomous by design, guarded by the harness
 
 Baro is built to be fire and forget: you hand it a goal, and it plans, builds,
 reviews and integrates the work on its own, normally ending with a pull request.
 It does not stop to ask about each command, because a run executes hundreds of
-them. The safety is not a prompt per command. It is built into Baro's harness, so
-nothing an agent does can be destructive or irreversible:
+them. Instead of a prompt per command, Baro's harness guards the run:
 
 - **Isolated worktrees.** Every story runs in its own git worktree on its own
-  branch. Agents never write in your checkout, and work is integrated in a
-  separate run worktree on a `baro/<goal>` branch, so your checkout is untouched
-  while a run works.
-- **A contained shell.** A command that would leave the story's worktree is
-  refused before it runs: `cd` or absolute paths outside it, `..` or `~`
-  traversal, nested `sh -c` / `eval`, and redirects through a symlink that
-  escapes it.
+  branch, and work is integrated in a separate run worktree on a `baro/<goal>`
+  branch, so your checkout is not where agents work.
+- **Guarded commands and writes.** Baro checks each shell command and file write
+  an agent makes and refuses those that would leave the story's worktree: `cd`
+  or absolute paths outside it, `..` or `~` traversal, nested `sh -c` / `eval`,
+  redirects through an escaping symlink, and writes outside the worktree.
 - **No publishing by agents.** `git push`, `gh` and GitHub API calls are refused
-  in every agent lane. Publishing belongs to Baro itself, after review, and
-  through this plugin not at all: the plugin always runs Baro with
-  `--local-only`, so nothing leaves your machine.
-- **Owned files.** Each story writes the files it owns. A write to a file that
-  another unfinished story holds is refused at the write.
+  in agent lanes, and through this plugin Baro itself never publishes: the
+  plugin always runs it with `--local-only`, so the run's result stays on your
+  machine.
+- **Owned files.** Each story writes the files it owns; a write to a file that
+  another unfinished story holds is refused.
 - **Reviewed before it lands.** A story integrates only after the Critic accepts
-  it, against the exact content it reviewed, and the merged result is verified
-  at the end of the run.
+  it, and the merged result is verified at the end of the run.
 - **Nothing is lost.** The work of a failed or cancelled attempt is kept on a
-  recovery branch, never silently dropped.
+  recovery branch.
+
+**What this does not guarantee yet.** These guards judge the commands and writes
+an agent issues; they are not an operating-system sandbox. A program an agent
+writes and then runs (a script, a test) is not inspected, and agents run with
+your user account and its credentials. Treat a Baro run like a developer you
+let work in that repository: approve it on repositories and machines where that
+is acceptable. An OS-level sandbox for every agent, push credentials removed from
+agent environments, and ownership checked again at integration are in progress
+in Baro and will be listed here when they ship.
 
 ### What you approve in Hermes
 
@@ -247,7 +253,7 @@ Read this before you install:
   again.** `baro_run`, and `baro_plan` while it runs, start Baro in the `repo`
   you pass. Once you approve the launch, Baro's coding agents edit files and run
   shell commands there (builds, tests, git) on their own, inside the limits in
-  [Autonomous by design, safe in the harness](#autonomous-by-design-safe-in-the-harness).
+  [Autonomous by design, guarded by the harness](#autonomous-by-design-guarded-by-the-harness).
   The plugin never approves on your behalf and never turns a guard off.
 - **Network calls to configured model providers.** Baro calls the model provider
   you configured for it (or the one you name with `llm` and `openai_base_url`).
