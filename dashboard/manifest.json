@@ -1,0 +1,9 @@
+{
+  "name": "baro",
+  "label": "Baro",
+  "description": "Read-only backend for the Baro run board in desktop/plugin.js",
+  "tab": {
+    "hidden": true
+  },
+  "api": "plugin_api.py"
+}
