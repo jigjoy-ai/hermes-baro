@@ -46,6 +46,9 @@ PLAN_ONLY_FLAG: str | None = None
 
 MAX_GOAL_CHARS = 4000
 
+# The npm package runner that fetches and runs the pinned BARO_SPEC.
+LAUNCHER = "npx"
+
 # Flag spellings, confirmed at crates/baro-tui/src/cli/cli.rs (lines above).
 _FLAG_HEADLESS = "--headless"  # cli.rs:249
 _FLAG_CWD = "--cwd"  # cli.rs:39
@@ -73,7 +76,7 @@ def build_command(
     has one (it does not, so it is currently a no-op).
     """
     parts = [
-        "npx",
+        LAUNCHER,
         "--yes",
         BARO_SPEC,
         _FLAG_HEADLESS,
