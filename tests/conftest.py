@@ -35,3 +35,11 @@ def _read_fixture(name: str) -> list[str]:
 def load_fixture():
     """Return ``load_fixture(name) -> list[str]``: the recorded lines of a fixture."""
     return _read_fixture
+
+
+@pytest.fixture
+def memory_store():
+    """A fresh in-memory ``BoardStore`` (JSON-only values)."""
+    from baro_plugin.core.store import MemoryStore
+
+    return MemoryStore()
