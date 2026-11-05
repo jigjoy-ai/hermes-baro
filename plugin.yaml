@@ -1,0 +1,26 @@
+# Hermes plugin manifest (ADR-011). Key names follow
+# reference-hermes-agent/website/docs/developer-guide/plugins/index.md:357-368
+# (name, version, description, provides_tools) and :624 (license).
+# requires_hermes is checked by hermes_cli/plugin_validate.py:115-128.
+#
+# provides_tools must list exactly what register() registers: the four tools of
+# toolset "baro" (bridge.py). See index.md:370-372 and the "declared tools" check
+# at hermes_cli/plugin_validate.py:436-458.
+# The Desktop surface needs no manifest key: Hermes loads desktop/plugin.js from
+# its path (index.md:700-703), and plugin_validate_desktop.py lints that file.
+# There are no hooks, commands or privileged host capabilities, so provides_hooks
+# and capabilities are left out (index.md:384-412).
+name: baro
+version: 0.1.0
+description: >-
+  Hand a software goal to Baro and watch it run as a live, dependency-aware
+  kanban. Provides baro_plan, baro_run, baro_status and baro_cancel, plus a
+  Desktop panel.
+author: JigJoy
+license: MIT
+requires_hermes: ">=0.22.7"
+provides_tools:
+  - baro_plan
+  - baro_run
+  - baro_status
+  - baro_cancel
