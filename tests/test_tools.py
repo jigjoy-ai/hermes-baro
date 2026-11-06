@@ -15,6 +15,7 @@ from baro_plugin.core.command import (
     BARO_VERSION,
     LAUNCHER,
     MAX_GOAL_CHARS,
+    PLAN_ENV,
     PLAN_ONLY_FLAG,
     build_command,
     validate_args,
@@ -35,6 +36,14 @@ def test_build_command_pinned_exact_shape_without_optional_flags():
     argv = shlex.split(cmd)
     assert argv[-1] == NASTY_GOAL
     assert argv[argv.index("--cwd") + 1] == NASTY_REPO
+
+
+def test_build_command_plan_only_turns_off_progressive_planning():
+    # Progressive planning sends an empty first plan; plan-only needs the whole plan first.
+    cmd = build_command(NASTY_GOAL, NASTY_REPO, plan_only=True)
+    assert PLAN_ENV == "BARO_PROGRESSIVE_PLANNING=0"
+    assert cmd == PLAN_ENV + " " + build_command(NASTY_GOAL, NASTY_REPO)
+    assert shlex.split(cmd)[-1] == NASTY_GOAL
 
 
 def test_build_command_pinned_version_is_exact_semver():
@@ -60,7 +69,7 @@ def test_build_command_pinned_launcher_is_the_npm_package_runner():
     ],
 )
 def test_build_command_pinned_prefix_with_and_without_flags(kwargs):
-    cmd = build_command("goal", "/repo", **kwargs)
+    cmd = build_command("goal", "/repo", **kwargs).removeprefix(PLAN_ENV + " ")
     assert cmd.startswith(f"{LAUNCHER} --yes baro-ai@{BARO_VERSION} --headless")
 
 
@@ -112,7 +121,7 @@ def test_build_command_pinned_quotes_optional_values():
 def test_build_command_pinned_plan_only_flag_absent_in_baro():
     # crates/baro-tui/src/cli/cli.rs defines no plan-only argument.
     assert PLAN_ONLY_FLAG is None
-    assert build_command("g", "/r", plan_only=True) == build_command("g", "/r")
+    assert build_command("g", "/r", plan_only=True) == PLAN_ENV + " " + build_command("g", "/r")
 
 
 def test_build_command_pinned_has_no_hardcoded_backend_defaults():

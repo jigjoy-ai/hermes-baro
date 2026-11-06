@@ -42,6 +42,13 @@ BARO_VERSION = "0.122.1"
 BARO_SPEC = "baro-ai@" + BARO_VERSION
 BARO_PACKAGE = BARO_SPEC.split("@")[0]
 
+# Baro plans progressively by default: the first plan event (``init``) carries
+# no stories and they arrive later in ``replan`` events, while the first stories
+# already execute. With this variable set to 0 Baro plans the whole goal first,
+# so ``init`` carries the full plan
+# (crates/baro-tui/src/progressive_planning.rs:18 and :37-51).
+PLAN_ENV = "BARO_PROGRESSIVE_PLANNING=0"
+
 # crates/baro-tui/src/cli/cli.rs has no plan-only argument (see module docstring).
 PLAN_ONLY_FLAG: str | None = None
 
@@ -73,10 +80,12 @@ def build_command(
     Shape: ``npx --yes <BARO_SPEC> --headless --cwd <repo> --local-only
     [--llm X] [--openai-base-url Y] [--model Z] [PLAN_ONLY_FLAG] <goal>``.
     Every value is ``shlex.quote``d. Each optional flag is emitted only when its
-    value is a non-empty string. ``plan_only`` adds PLAN_ONLY_FLAG only when Baro
-    has one (it does not, so it is currently a no-op).
+    value is a non-empty string. ``plan_only`` prefixes PLAN_ENV, so the first
+    plan event holds the whole plan, and adds PLAN_ONLY_FLAG only when Baro has
+    one (it does not).
     """
-    parts = [
+    parts = [PLAN_ENV] if plan_only else []
+    parts += [
         LAUNCHER,
         "--yes",
         BARO_SPEC,

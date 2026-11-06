@@ -140,8 +140,11 @@ Result:
 
 An edge always reads `{from: prerequisite, to: dependent}`. Baro has no
 plan-only mode: `--headless` confirms the plan and goes on to execute it. So
-`baro_plan` reads Baro's output until the first plan event and stops the process
-at once (`native_plan_only: false`). If Baro starts a story before it reports a
+`baro_plan` runs Baro with `BARO_PROGRESSIVE_PLANNING=0`, which makes Baro plan
+the whole goal before it starts any story, reads the output until the first plan
+event that holds stories, and stops the process at once
+(`native_plan_only: false`). The stopped run leaves an empty `baro/<goal>`
+branch in the repository. If Baro starts a story before it reports a
 plan, the process is stopped and the tool returns `dispatch_failed`. If no plan
 arrives within 600 seconds, the process is stopped and the tool returns
 `plan_timeout`.

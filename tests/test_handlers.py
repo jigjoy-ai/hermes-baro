@@ -101,6 +101,17 @@ def test_tool_schemas_cover_the_four_tools():
 # ---------------------------------------------------------------- baro_plan
 
 
+def test_plan_skips_an_empty_progressive_plan_event(load_fixture, repo, clock):
+    # Baro 0.122 sends a progressive plan's first init with no stories.
+    empty_init = json.dumps({"type": "init", "project": "demo", "stories": []})
+    lines = [empty_init] + load_fixture("plan_only.jsonl")
+    bridge = FakeBridge(chunks_by_line(lines))
+    result = tools.handle_baro_plan(bridge, goal_args(repo))
+    assert result["ok"] is True, result
+    assert [s["id"] for s in result["stories"]] == ["S1", "S2"]
+    assert result["stories_started"] == 0
+
+
 def test_plan_returns_stories_and_edges(load_fixture, repo, clock):
     bridge = FakeBridge(chunks_by_line(load_fixture("plan_only.jsonl")))
     result = tools.handle_baro_plan(bridge, goal_args(repo))
@@ -120,7 +131,7 @@ def test_plan_returns_stories_and_edges(load_fixture, repo, clock):
     # One edge per depends_on entry.
     assert len(result["edges"]) == sum(len(s["depends_on"]) for s in result["stories"])
     [start] = bridge.calls_named("start_background")
-    assert start == ("start_background", build_command("Add a health endpoint", repo), repo)
+    assert start == ("start_background", build_command("Add a health endpoint", repo, plan_only=True), repo)
 
 
 def test_plan_kills_after_first_plan_event(load_fixture, repo, clock):
@@ -174,7 +185,7 @@ def test_plan_kills_after_first_plan_event_ignores_later_lines_in_same_read(
     assert result["edges"] == [{"from": "S1", "to": "S2"}]
     # Kill is immediate: exactly one read, then the kill, and nothing after.
     assert bridge.dispatches == [
-        ("start_background", build_command("Add a health endpoint", repo), repo),
+        ("start_background", build_command("Add a health endpoint", repo, plan_only=True), repo),
         ("read_output", "proc-1", 0),
         ("kill", "proc-1"),
     ]

@@ -288,8 +288,9 @@ def handle_baro_plan(bridge: Any, args: dict) -> dict:
     """Return Baro's plan without executing stories.
 
     Baro has no plan-only flag (core/command.py). With ``--headless`` it
-    confirms the plan and goes on to execute it. So the handler reads output
-    until the first plan event and kills the process at once. It stops
+    confirms the plan and goes on to execute it. So the handler runs Baro with
+    progressive planning off (PLAN_ENV), reads output until the first plan
+    event that holds stories, and kills the process at once. It stops
     consuming at the plan: lines after it, even in the same read, are never
     parsed, so no ``story_start`` is consumed and ``stories_started`` is 0. A
     ``story_start`` *before* any plan means execution began: that is an
@@ -302,7 +303,7 @@ def handle_baro_plan(bridge: Any, args: dict) -> dict:
         return err
     native = PLAN_ONLY_FLAG is not None
     started_at = _monotonic()
-    process_id, err = _start(bridge, _command(values, plan_only=native), values["repo"])
+    process_id, err = _start(bridge, _command(values, plan_only=True), values["repo"])
     if err:
         return err
 
@@ -329,6 +330,9 @@ def handle_baro_plan(bridge: Any, args: dict) -> dict:
                 continue
             if event.kind == "story_start":
                 return stop(error(DISPATCH_FAILED, _execution_began(event.story_id)), exited)
+            if event.kind == "plan" and plan is None and not event.stories:
+                # A progressive plan's first event: its stories come later.
+                continue
             if event.kind == "plan" and plan is None:
                 plan = event
                 if not native:
