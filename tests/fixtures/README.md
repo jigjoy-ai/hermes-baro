@@ -12,21 +12,25 @@ Every line was taken from Baro's own repository, in one of two ways:
 - **projection**: Baro's emit code applied to Baro test data, both cited. Two
   lines in the whole set are projections, because no Baro test contains them
   as a literal.
+- **constructed**: values written for this fixture, in the exact shape Baro's
+  emit code produces (cited). One line: Baro 0.122 removed the test whose
+  replan (a story split, with removals and rewiring) this line used to copy,
+  and no current Baro test emits a replan that removes and rewires stories.
 
-No value was made up. Every id, title, project name, error text and number
-comes from the cited span.
+Apart from the constructed line, no value was made up. Every id, title, project
+name, error text and number comes from the cited span.
 
 ## How a headless stream is formed (why these shapes)
 
-- The orchestrator writes `JSON.stringify({ ts, ...event })` per line
-  (`packages/baro-orchestrator/src/tui-protocol.ts:237-238`). Event shapes are
-  the `BaroEvent` union at `packages/baro-orchestrator/src/tui-protocol.ts:88-230`.
+- The orchestrator writes `JSON.stringify({ ts, ...event })` per line, with capability
+  tokens redacted (`packages/baro-orchestrator/src/tui-protocol.ts:242-245`). Event shapes are
+  the `BaroEvent` union at `packages/baro-orchestrator/src/tui-protocol.ts:88-235`.
 - `baro --headless` echoes each orchestrator line to stdout
   (`crates/baro-tui/src/orchestrator_client.rs:204-217`), and prints a few host
-  lines of its own, e.g. `plan_ready` (`crates/baro-tui/src/main.rs:1426`).
+  lines of its own, e.g. `plan_ready` (`crates/baro-tui/src/main.rs:1406`).
 - `ts` is absent from these fixtures because Baro's capture helper strips the
   wall-clock `ts` from every emitted line before tests assert on it
-  (`packages/baro-orchestrator/test/execution/helpers.ts:65-77`, `captureStdout`).
+  (`packages/baro-orchestrator/test/execution/helpers.ts:64-76`, `captureStdout`).
   The v3 contract says the same (`docs/tui-protocol-v3.md`, section 1). The
   parser treats `ts` as optional.
 
@@ -41,18 +45,18 @@ Paths are relative to the Baro repository root. `L` is the fixture line number.
 | run_success.jsonl | 3 | verbatim | packages/baro-dsh/test/delegate-run.test.ts:56 |
 | run_success.jsonl | 4 | verbatim | packages/baro-dsh/test/delegate-run.test.ts:57 |
 | run_success.jsonl | 5 | verbatim | packages/baro-dsh/test/delegate-run.test.ts:58 |
-| plan_only.jsonl | 1 | projection | crates/baro-tui/src/main.rs:1426 |
+| plan_only.jsonl | 1 | projection | crates/baro-tui/src/main.rs:1406 |
 | plan_only.jsonl | 2 | verbatim | crates/baro-tui/src/screens/execute.rs:715-716 |
 | plan_only.jsonl | 3 | verbatim | crates/baro-tui/src/screens/execute.rs:718 |
 | plan_only.jsonl | 4 | verbatim | crates/baro-tui/src/screens/execute.rs:719 |
 | plan_only.jsonl | 5 | verbatim | crates/baro-tui/src/screens/execute.rs:720 |
 | plan_only.jsonl | 6 | verbatim | crates/baro-tui/src/screens/execute.rs:721 |
-| run_replan_adds_prereq.jsonl | 1 | verbatim | crates/baro-tui/src/app.rs:2253-2254 |
-| run_replan_adds_prereq.jsonl | 2 | verbatim | crates/baro-tui/src/app.rs:2258 |
-| run_replan_adds_prereq.jsonl | 3 | verbatim | crates/baro-tui/src/app.rs:2363-2365 |
+| run_replan_adds_prereq.jsonl | 1 | verbatim | crates/baro-tui/src/app.rs:2252-2253 |
+| run_replan_adds_prereq.jsonl | 2 | verbatim | crates/baro-tui/src/app.rs:2257 |
+| run_replan_adds_prereq.jsonl | 3 | verbatim | crates/baro-tui/src/app.rs:2362-2364 |
 | run_replan_adds_prereq.jsonl | 4 | verbatim | packages/baro-orchestrator/test/execution/forwarders/story-lifecycle.test.ts:73-79 |
-| run_replan_adds_prereq.jsonl | 5 | verbatim | packages/baro-orchestrator/test/execution/forwarders/dag.test.ts:73-80 |
-| run_failure_blocks_dependents.jsonl | 1 | projection | packages/baro-orchestrator/src/orchestrate.ts:1905-1917; packages/baro-orchestrator/test/execution-mode.test.ts:124-140; packages/baro-orchestrator/test/execution-mode.test.ts:426-431; crates/baro-tui/src/screens/execute.rs:715 |
+| run_replan_adds_prereq.jsonl | 5 | constructed | packages/baro-orchestrator/src/execution/forwarders/dag.ts:106-120 (shape); `source` format from packages/baro-orchestrator/test/execution/forwarders/dag.test.ts:122 |
+| run_failure_blocks_dependents.jsonl | 1 | projection | packages/baro-orchestrator/src/orchestrate.ts:1718-1730; packages/baro-orchestrator/test/execution-mode.test.ts:124-140; packages/baro-orchestrator/test/execution-mode.test.ts:426-431; crates/baro-tui/src/screens/execute.rs:715 |
 | run_failure_blocks_dependents.jsonl | 2 | verbatim | packages/baro-orchestrator/test/execution/forwarders/story-lifecycle.test.ts:71 |
 | run_failure_blocks_dependents.jsonl | 3 | verbatim | packages/baro-orchestrator/test/execution/forwarders/story-lifecycle.test.ts:72 |
 | run_failure_blocks_dependents.jsonl | 4 | verbatim | packages/baro-orchestrator/test/execution/forwarders/story-lifecycle.test.ts:73-79 |
@@ -63,10 +67,10 @@ Paths are relative to the Baro repository root. `L` is the fixture line number.
 ## The two projections
 
 - **plan_only.jsonl L1:** `println!(r#"{{"type":"plan_ready","stories":{}}}"#, stories.len())`
-  (`crates/baro-tui/src/main.rs:1426`), where `stories.len()` = 2, the story
+  (`crates/baro-tui/src/main.rs:1406`), where `stories.len()` = 2, the story
   count of the plan on L2.
 - **run_failure_blocks_dependents.jsonl L1:** the `init` emit at
-  `packages/baro-orchestrator/src/orchestrate.ts:1905-1917` applied to Baro's
+  `packages/baro-orchestrator/src/orchestrate.ts:1718-1730` applied to Baro's
   chained test PRD (`execution-mode.test.ts:426-431`, ids S1→S2→S3→S4, built by
   the `prd()` helper at `:124-140`: `project: "p"`, `title: s.id`). Key order
   follows the emit literal. `mode` and `mode_reason` are `undefined` for that

@@ -1,10 +1,10 @@
 """Parse Baro's headless event stream into a normalised event model.
 
 ``baro --headless`` writes one JSON object per line on stdout. The orchestrator
-emits them through ``emit()`` (packages/baro-orchestrator/src/tui-protocol.ts:237-238,
+emits them through ``emit()`` (packages/baro-orchestrator/src/tui-protocol.ts:242-245,
 which also stamps ``ts``), and the Rust host re-echoes each line unchanged in
 content (crates/baro-tui/src/orchestrator_client.rs:204-217). The wire shapes
-are the ``BaroEvent`` union at packages/baro-orchestrator/src/tui-protocol.ts:88-230.
+are the ``BaroEvent`` union at packages/baro-orchestrator/src/tui-protocol.ts:88-235.
 
 This is the only module that knows Baro's field names.
 """
@@ -26,7 +26,7 @@ from typing import Any, Literal
 #   success   field holding the run's boolean success flag
 _TYPE_MAP: dict[str, dict[str, str]] = {
     # packages/baro-orchestrator/src/tui-protocol.ts:93 (emitted at
-    # packages/baro-orchestrator/src/orchestrate.ts:1906 with the PRD's stories)
+    # packages/baro-orchestrator/src/orchestrate.ts:1718 with the PRD's stories)
     "init": {"kind": "plan", "stories": "stories"},
     # packages/baro-orchestrator/src/tui-protocol.ts:98 (emitted at
     # packages/baro-orchestrator/src/execution/forwarders/story-lifecycle.ts:198;
@@ -44,7 +44,7 @@ _TYPE_MAP: dict[str, dict[str, str]] = {
     # retries, emitted at packages/baro-orchestrator/src/execution/forwarders/story-lifecycle.ts:237)
     "story_error": {"kind": "story_failed", "story_id": "id", "error": "error"},
     # packages/baro-orchestrator/src/tui-protocol.ts:177-184 (emitted at
-    # packages/baro-orchestrator/src/execution/forwarders/dag.ts:134-148)
+    # packages/baro-orchestrator/src/execution/forwarders/dag.ts:106-120)
     "replan": {
         "kind": "replan",
         "message": "reason",
@@ -53,11 +53,11 @@ _TYPE_MAP: dict[str, dict[str, str]] = {
         "removed": "removed",
     },
     # packages/baro-orchestrator/src/tui-protocol.ts:120-131 (emitted at
-    # packages/baro-orchestrator/src/orchestrate.ts:2167-2172)
+    # packages/baro-orchestrator/src/orchestrate.ts:1972-1990)
     "done": {"kind": "run_end", "success": "success", "error": "abort_reason"},
 }
 
-# packages/baro-orchestrator/src/tui-protocol.ts:238 (every line carries ``ts``)
+# packages/baro-orchestrator/src/tui-protocol.ts:244 (every line carries ``ts``)
 _TS_FIELD = "ts"
 # packages/baro-orchestrator/src/tui-protocol.ts:19-23 (StoryInfo)
 _STORY_ID, _STORY_TITLE, _STORY_DEPS = "id", "title", "depends_on"

@@ -2,4 +2,4 @@
 {"type":"story_start","id":"S1","title":"One"}
 {"type":"replan","source":"sentry","reason":"scope shift","added":[{"id":"S3","title":"Three","depends_on":["S1"]}],"removed":["S2"],"rewired":[{"id":"S1","depends_on":[]}]}
 {"type":"story_complete","id":"S1","duration_secs":12,"files_created":1,"files_modified":1}
-{"type":"replan","source":"surgeon","reason":"S2 too large","added":[{"id":"S2a","title":"First half of S2","depends_on":["S1"]}],"removed":["S2"],"rewired":[{"id":"S3","depends_on":["S2a"]}]}
+{"type":"replan","source":"agent:S2@graph-v2","reason":"S2 too large","added":[{"id":"S2a","title":"First half of S2","depends_on":["S1"]}],"removed":["S2"],"rewired":[{"id":"S3","depends_on":["S2a"]}]}

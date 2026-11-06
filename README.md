@@ -28,29 +28,40 @@ them. Instead of a prompt per command, Baro's harness guards the run:
 - **Isolated worktrees.** Every story runs in its own git worktree on its own
   branch, and work is integrated in a separate run worktree on a `baro/<goal>`
   branch, so your checkout is not where agents work.
-- **Guarded commands and writes.** Baro checks each shell command and file write
-  an agent makes and refuses those that would leave the story's worktree: `cd`
-  or absolute paths outside it, `..` or `~` traversal, nested `sh -c` / `eval`,
-  redirects through an escaping symlink, and writes outside the worktree.
-- **No publishing by agents.** `git push`, `gh` and GitHub API calls are refused
-  in agent lanes, and through this plugin Baro itself never publishes: the
-  plugin always runs it with `--local-only`, so the run's result stays on your
-  machine.
+- **An OS sandbox around each story.** With Baro's default Claude backend,
+  every shell command a story runs, and every program it starts (a script, a
+  test, an install), runs inside Claude Code's OS sandbox: Seatbelt on macOS,
+  bubblewrap on Linux. It can write only to the story's worktree, the git
+  metadata a commit needs, a Baro-owned package cache and the run's shared
+  dependency folders. It cannot read credential stores (`~/.ssh`, `~/.aws`,
+  `~/.config/gh`, `~/.npmrc` and similar), and it reaches the network only
+  through package registries. If the sandbox cannot start (on Linux, when
+  bubblewrap is not installed), the story does not run.
+- **Guarded file edits.** Baro checks each file write and edit an agent makes
+  and refuses those outside the story's worktree.
+- **No publishing by agents.** `git push`, `gh`, changes to git config and
+  remotes are refused in agent lanes, credentials are removed from agent
+  environments, and push URLs are disabled. Through this plugin Baro itself
+  never publishes either: the plugin always runs it with `--local-only`, so
+  the run's result stays on your machine.
 - **Owned files.** Each story writes the files it owns; a write to a file that
-  another unfinished story holds is refused.
+  another unfinished story holds is refused, and ownership is checked again
+  when work is integrated.
 - **Reviewed before it lands.** A story integrates only after the Critic accepts
   it, and the merged result is verified at the end of the run.
 - **Nothing is lost.** The work of a failed or cancelled attempt is kept on a
   recovery branch.
 
-**What this does not guarantee yet.** These guards judge the commands and writes
-an agent issues; they are not an operating-system sandbox. A program an agent
-writes and then runs (a script, a test) is not inspected, and agents run with
-your user account and its credentials. Treat a Baro run like a developer you
-let work in that repository: approve it on repositories and machines where that
-is acceptable. An OS-level sandbox for every agent, push credentials removed from
-agent environments, and ownership checked again at integration are in progress
-in Baro and will be listed here when they ship.
+**What this does not guarantee.** Agents run as your user account. Inside the
+sandbox they can read your files outside the credential stores listed above
+(another repository, for example), and they can download packages from public
+registries, which run install scripts. With the OpenAI-compatible backend used
+for Hermes Portal (`--llm openai`), the OS sandbox covers less: on macOS, shell
+writes are confined to the worktree by Seatbelt, but reads and network are not
+limited; on Linux there is no OS sandbox, and Baro's command guard, which
+judges each command and refuses those that would leave the worktree, is the
+only check. Treat a Baro run like a developer you let work in that repository:
+approve it on repositories and machines where that is acceptable.
 
 ### What you approve in Hermes
 
@@ -113,7 +124,7 @@ Result:
   "ok": true,
   "goal": "...",
   "repo": "/abs/path",
-  "baro_version": "0.121.0",
+  "baro_version": "0.122.1",
   "stories": [{"id": "S1", "title": "...", "depends_on": []},
               {"id": "S2", "title": "...", "depends_on": ["S1"]}],
   "edges": [{"from": "S1", "to": "S2"}],
@@ -144,8 +155,8 @@ Result:
   "ok": true,
   "run_id": "baro-20261105T142233Z-a1b2c3",
   "status": "running",
-  "baro_version": "0.121.0",
-  "command": "npx --yes baro-ai@0.121.0 --headless --cwd /abs/path --local-only 'the goal'"
+  "baro_version": "0.122.1",
+  "command": "npx --yes baro-ai@0.122.1 --headless --cwd /abs/path --local-only 'the goal'"
 }
 ```
 
@@ -169,7 +180,7 @@ Result: `{"ok": true, "board": <board>}`, where the board is:
   "run_id": "baro-20261105T142233Z-a1b2c3",
   "goal": "...",
   "repo": "/abs/path",
-  "baro_version": "0.121.0",
+  "baro_version": "0.122.1",
   "status": "running",
   "started_at": "2026-11-05T14:22:33Z",
   "ended_at": null,
@@ -301,9 +312,10 @@ backend is set up with stays unused.
 ## Pinned Baro version
 
 The plugin runs exactly one Baro release:
-`BARO_VERSION = "0.121.0"` in `core/command.py`, run as
-`npx --yes baro-ai@0.121.0`. There is no `latest` tag, no version range and no
-update logic. `--headless` also turns off the Baro launcher's own updater. A new
+`BARO_VERSION = "0.122.1"` in `core/command.py`, run as
+`npx --yes baro-ai@0.122.1`. There is no `latest` tag, no version range and no
+update logic. `--headless` also turns off Baro's own updater and update check,
+so a run makes no network call to npm beyond the `npx` download. A new
 Baro version reaches users only through a reviewed change to `BARO_VERSION` and
 a new plugin release.
 

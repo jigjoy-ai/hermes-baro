@@ -3,30 +3,31 @@
 Sources, all in the Baro repository (paths relative to its root):
 
 - Version pin: packages/baro-app/package.json:2-3 publishes the CLI package
-  with ``"version": "0.121.0"`` (crates/baro-tui/Cargo.toml:3 carries the same
+  with ``"version": "0.122.1"`` (crates/baro-tui/Cargo.toml:3 carries the same
   version for the Rust host). Its ``bin`` entry ``baro`` at
   packages/baro-app/package.json:6-8 is what ``npx`` runs. That launcher
   forwards argv unchanged to the native binary
   (packages/baro-app/bin/baro:13 and :34). It skips its bundled updater
   whenever ``--headless`` is in argv (the ``skipReason`` check at line 31 of the
   updater module in packages/baro-app/bin/), so a pinned headless run stays on
-  the pinned version.
+  the pinned version. The native binary makes no update check of its own in a
+  headless run either (``update_check_enabled`` in crates/baro-tui/src/main.rs).
 - Flags: clap definitions in crates/baro-tui/src/cli/cli.rs:
     positional goal                   cli.rs:15-16
     --cwd <dir> (default ".")         cli.rs:39-40
-    --local-only                      cli.rs:61-63
-    --model / -m <name>               cli.rs:106-109
-    --llm <backend> (default claude)  cli.rs:221-222
-    --openai-base-url <url>           cli.rs:224-227
-    --headless                        cli.rs:247-250
-  No plan-only flag exists. cli.rs:7-269 (the whole Cli struct) has no such argument and no
+    --local-only                      cli.rs:58-59
+    --model / -m <name>               cli.rs:102-105
+    --llm <backend> (default claude)  cli.rs:217-218
+    --openai-base-url <url>           cli.rs:220-223
+    --headless                        cli.rs:243-246
+  No plan-only flag exists. cli.rs:7-265 (the whole Cli struct) has no such argument and no
   subcommand. ``--headless`` auto-confirms the plan and goes on to execution
-  (cli.rs:247-248). So PLAN_ONLY_FLAG is None, and the plan tool must stop the
+  (cli.rs:243-244). So PLAN_ONLY_FLAG is None, and the plan tool must stop the
   process itself after the first plan event (the ``init`` event the
   orchestrator emits, packages/baro-orchestrator/src/tui-protocol.ts:93).
 
 No backend, base URL or model is ever defaulted here. Baro then uses whatever
-backend its user configured (cli.rs:221 defaults ``--llm`` itself).
+backend its user configured (cli.rs:217 defaults ``--llm`` itself).
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ import os
 import shlex
 
 # packages/baro-app/package.json:3 (exact version, no range).
-BARO_VERSION = "0.121.0"
+BARO_VERSION = "0.122.1"
 # The single pinned npm spec. BARO_PACKAGE is derived from it, so no unpinned
 # package literal exists anywhere in the plugin.
 BARO_SPEC = "baro-ai@" + BARO_VERSION
@@ -50,12 +51,12 @@ MAX_GOAL_CHARS = 4000
 LAUNCHER = "npx"
 
 # Flag spellings, confirmed at crates/baro-tui/src/cli/cli.rs (lines above).
-_FLAG_HEADLESS = "--headless"  # cli.rs:249
+_FLAG_HEADLESS = "--headless"  # cli.rs:245
 _FLAG_CWD = "--cwd"  # cli.rs:39
-_FLAG_LOCAL_ONLY = "--local-only"  # cli.rs:62 (clap kebab-cases local_only)
-_FLAG_LLM = "--llm"  # cli.rs:221
-_FLAG_BASE_URL = "--openai-base-url"  # cli.rs:226 (kebab-cased openai_base_url)
-_FLAG_MODEL = "--model"  # cli.rs:108
+_FLAG_LOCAL_ONLY = "--local-only"  # cli.rs:58 (clap kebab-cases local_only)
+_FLAG_LLM = "--llm"  # cli.rs:217
+_FLAG_BASE_URL = "--openai-base-url"  # cli.rs:222 (kebab-cased openai_base_url)
+_FLAG_MODEL = "--model"  # cli.rs:104
 
 
 def build_command(
