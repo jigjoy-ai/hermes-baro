@@ -89,6 +89,11 @@ after the install. Pass `--enable` or `--no-enable` to skip that question. For a
 reproducible install, pin a full commit with
 `hermes plugins install https://github.com/jigjoy-ai/hermes-baro --ref <40-hex-sha>`.
 
+Enabling turns on the agent half (the tools and the approval hook). Hermes
+Desktop keeps the kanban page of a plugin installed from Git off until you turn
+it on: open **Capabilities → Plugins → Baro** and switch on **Desktop**. A
+**Baro** entry then appears in the sidebar.
+
 Requirements:
 
 - Hermes Agent `>=0.22.7` (`requires_hermes` in `plugin.yaml`).
