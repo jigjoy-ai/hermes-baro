@@ -108,6 +108,7 @@ const styles = {
   meta: { fontSize: '0.8125rem', color: 'var(--ui-text-secondary)' },
   muted: { fontSize: '0.8125rem', color: 'var(--ui-text-tertiary)' },
   error: { fontSize: '0.8125rem', color: 'var(--ui-text-danger, var(--ui-text-secondary))' },
+  clamp: { display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' },
   select: {
     background: 'transparent',
     color: 'var(--ui-text-primary)',
@@ -158,6 +159,17 @@ const styles = {
   }
 }
 
+const CARD_NOTE_CHARS = 90
+
+// The card shows a glance; the full text stays in baro_status and on hover.
+function cardNote(text) {
+  const verdict = /^\[critic\/(pass|fail)\]/.exec(text)
+  if (verdict) return verdict[1] === 'pass' ? 'Critic: passed' : 'Critic: sent back for changes'
+  const line = text.split('\n')[0].replace(/\s+/g, ' ').trim()
+  const sentence = line.split(/(?<=[.!?])\s/)[0]
+  return sentence.length > CARD_NOTE_CHARS ? sentence.slice(0, CARD_NOTE_CHARS - 1).trimEnd() + '…' : sentence
+}
+
 function StoryCard({ story }) {
   const children = [
     h('div', { key: 'title', style: styles.cardTitle }, story.title || story.id),
@@ -169,10 +181,10 @@ function StoryCard({ story }) {
     children.push(h('span', { key: 'bbf', style: styles.badge }, 'blocked by failure'))
   }
   if (story.error) {
-    children.push(h('div', { key: 'error', style: styles.error }, story.error))
+    children.push(h('div', { key: 'error', style: Object.assign({}, styles.error, styles.clamp), title: story.error }, story.error))
   }
   if (story.last_progress) {
-    children.push(h('div', { key: 'progress', style: styles.muted }, story.last_progress))
+    children.push(h('div', { key: 'progress', style: styles.muted, title: story.last_progress }, cardNote(story.last_progress)))
   }
   return h('div', { style: styles.card, 'data-story-id': story.id, 'data-story-state': story.state }, children)
 }
