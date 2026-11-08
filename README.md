@@ -129,7 +129,7 @@ Result:
   "ok": true,
   "goal": "...",
   "repo": "/abs/path",
-  "baro_version": "0.127.0",
+  "baro_version": "0.128.0",
   "stories": [{"id": "S1", "title": "...", "depends_on": []},
               {"id": "S2", "title": "...", "depends_on": ["S1"]}],
   "edges": [{"from": "S1", "to": "S2"}],
@@ -163,8 +163,8 @@ Result:
   "ok": true,
   "run_id": "baro-20261105T142233Z-a1b2c3",
   "status": "running",
-  "baro_version": "0.127.0",
-  "command": "npx --yes baro-ai@0.127.0 --headless --cwd /abs/path --local-only 'the goal'"
+  "baro_version": "0.128.0",
+  "command": "npx --yes baro-ai@0.128.0 --headless --cwd /abs/path --local-only 'the goal'"
 }
 ```
 
@@ -188,7 +188,7 @@ Result: `{"ok": true, "board": <board>}`, where the board is:
   "run_id": "baro-20261105T142233Z-a1b2c3",
   "goal": "...",
   "repo": "/abs/path",
-  "baro_version": "0.127.0",
+  "baro_version": "0.128.0",
   "status": "running",
   "started_at": "2026-11-05T14:22:33Z",
   "ended_at": null,
@@ -314,18 +314,21 @@ Then pass three tool arguments to `baro_plan` or `baro_run`:
 Baro then runs with `--llm openai --openai-base-url http://127.0.0.1:8645/v1
 --model <portal model>`. Use a model that your Portal tier serves, as listed by
 the proxy's `/v1/models` route. The proxy ignores the API key that the client
-sends and attaches your real credential itself. So whatever key Baro's `openai`
-backend is set up with stays unused.
+sends and attaches your real credential itself, so Baro needs no
+`OPENAI_API_KEY` for it: for a base URL on this machine (`localhost`,
+`127.0.0.1`, `::1`) Baro sends a placeholder, and any key you have set stays
+unused.
 
 `model` names every Baro phase, the Critic and the Surgeon included. Tested
-with Baro 0.127.0 on the free `nous/welcome` tier: a small goal ran through
-planning, its stories, the Critic's reviews and the final test run.
+with Baro 0.128.0 on the free `nous/welcome` tier, with no OpenAI key in the
+environment: a small goal ran through planning, its stories, the Critic's
+reviews and the final test run.
 
 ## Pinned Baro version
 
 The plugin runs exactly one Baro release:
-`BARO_VERSION = "0.127.0"` in `core/command.py`, run as
-`npx --yes baro-ai@0.127.0`. There is no `latest` tag, no version range and no
+`BARO_VERSION = "0.128.0"` in `core/command.py`, run as
+`npx --yes baro-ai@0.128.0`. There is no `latest` tag, no version range and no
 update logic. `--headless` also turns off Baro's own updater and update check,
 so a run makes no network call to npm beyond the `npx` download. A new
 Baro version reaches users only through a reviewed change to `BARO_VERSION` and
