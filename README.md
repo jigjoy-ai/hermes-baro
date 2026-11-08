@@ -299,8 +299,11 @@ Read this before you install:
   ends or you call `baro_cancel`. Baro starts its own child agent processes
   under it.
 - **Stored data.** Boards, run ids and process handles are kept only in the
-  plugin's own Hermes plugin state, up to the 50 most recent runs. The plugin
-  reads no `.env`, `auth.json` or other credential files.
+  plugin's own Hermes plugin state, up to the 50 most recent runs. `baro_run`
+  also pipes Baro's event stream through `tee` into
+  `events/<run id>.jsonl` in the plugin's own data directory, so the Desktop
+  board can follow the run live. The plugin reads no `.env`, `auth.json` or
+  other credential files.
 
 ## Using the Hermes subscription proxy
 

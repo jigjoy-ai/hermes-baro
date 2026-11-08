@@ -26,6 +26,7 @@ dispatch. baro_status only reads, so it stays allowed.
 from __future__ import annotations
 
 import re
+import shlex
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -449,11 +450,17 @@ def handle_baro_run(bridge: Any, args: dict) -> dict:
     values, err = _goal_args(args, bridge)
     if err:
         return err
+    run_id = new_run_id()
     command = _command(values)
+    events_file_of = getattr(bridge, "events_file", None)
+    mirror = events_file_of(run_id) if callable(events_file_of) else None
+    if mirror:
+        # The board replays this copy of Baro's stdout (core/events_file.py);
+        # pipefail keeps Baro's own exit status for Hermes's notification.
+        command = f"set -o pipefail 2>/dev/null; {command} | tee {shlex.quote(mirror)}"
     process_id, err = _start(bridge, command, values["repo"], notify_on_complete=True)
     if err:
         return err
-    run_id = new_run_id()
     board = Board(
         run_id=run_id,
         goal=values["goal"],

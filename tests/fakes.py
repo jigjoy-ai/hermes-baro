@@ -51,7 +51,9 @@ class FakeBridge:
         store: MemoryStore | None = None,
         settings: dict | None = None,
         reachable: bool = True,
+        events_dir: str | None = None,
     ) -> None:
+        self._events_dir = events_dir
         self.notify_flags: list[bool] = []
         self._settings = dict(settings or {})
         self._reachable = reachable
@@ -78,6 +80,9 @@ class FakeBridge:
 
     def settings(self) -> dict:
         return dict(self._settings)
+
+    def events_file(self, run_id: str) -> str | None:
+        return f"{self._events_dir}/{run_id}.jsonl" if self._events_dir else None
 
     def endpoint_reachable(self, base_url: str) -> bool:
         self.probed.append(base_url)

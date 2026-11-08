@@ -582,3 +582,11 @@ def test_proxy_not_running_is_reported_before_baro_starts(repo):
     assert result["error"] == "dispatch_failed"
     assert "hermes proxy start" in result["message"]
     assert bridge.calls_named("start_background") == []
+
+
+def test_run_mirrors_baro_events_for_the_board(repo, tmp_path):
+    bridge = FakeBridge(events_dir=str(tmp_path / "events"))
+    result = tools.handle_baro_run(bridge, {"goal": "Add a health endpoint", "repo": repo})
+    mirror = f"{tmp_path}/events/{result['run_id']}.jsonl"
+    assert result["command"].endswith(f"| tee {mirror}")
+    assert result["command"].startswith("set -o pipefail 2>/dev/null; npx --yes ")

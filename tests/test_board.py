@@ -275,3 +275,22 @@ def test_dependency_suspension_and_retry_are_not_failures():
     # Baro retries S1: a new start clears the failure.
     board = feed(board, ['{"type":"story_start","id":"S1","title":"S1"}'])
     assert stories(board)["S1"]["state"] == "running"
+
+
+def test_board_replays_the_mirrored_event_stream():
+    from baro_plugin.core.events_file import live_board
+
+    stored = new_board(status="running")
+    text = (
+        '{"type":"init","protocol":3,"project":"p","stories":[{"id":"S1","title":"S1","depends_on":[]},'
+        '{"id":"S2","title":"S2","depends_on":["S1"]}],"runner":"m"}\n'
+        '{"type":"story_start","id":"S1","title":"S1"}\n'
+        '{"type":"story_complete","id":"S1"}\n'
+        '{"type":"story_start","id":"S2"'  # a line still being written
+    )
+    s = stories(live_board(stored, text))
+    assert s["S1"]["state"] == "done"
+    assert s["S2"]["state"] == "ready"
+    # A finished board is what the store says, not a replay.
+    done = new_board(status="cancelled")
+    assert live_board(done, text) is done

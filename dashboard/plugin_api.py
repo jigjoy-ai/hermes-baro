@@ -74,6 +74,7 @@ def _load_core() -> Any:
 _load_core()
 from hermes_dashboard_plugin_baro_core.ids import RUN_ID_RE  # noqa: E402
 from hermes_dashboard_plugin_baro_core.store import RunRepository  # noqa: E402
+from hermes_dashboard_plugin_baro_core.events_file import events_path, live_board  # noqa: E402
 
 router = APIRouter()
 
@@ -97,4 +98,15 @@ def get_run(run_id: str, store: Any = Depends(get_store)) -> dict:
     board = RunRepository(store).load_board(run_id)
     if board is None:
         raise HTTPException(status_code=404, detail="unknown run")
-    return {"board": board.to_dict()}
+    return {"board": live_board(board, _events_text(store, run_id)).to_dict()}
+
+
+def _events_text(store: Any, run_id: str) -> str:
+    """The run's mirrored event stream (core/events_file.py), or "" when there is none."""
+    data_dir = getattr(store, "data_dir", None)
+    if data_dir is None:
+        return ""
+    try:
+        return events_path(data_dir, run_id).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""

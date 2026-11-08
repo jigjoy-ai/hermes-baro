@@ -46,6 +46,7 @@ import urllib.request
 from typing import Any, Callable
 
 from .core.consent import launch_approval
+from .core.events_file import events_path
 from .core.settings import SETTING_DEFAULTS
 from .tools import DISPATCH_FAILED, HANDLERS, TOOL_SCHEMAS, ApprovalDenied, DispatchError, error
 
@@ -153,6 +154,15 @@ class HermesBridge:
             except Exception:  # an older Hermes without plugin settings
                 values[key] = default
         return values
+
+    def events_file(self, run_id: str) -> str | None:
+        """Where ``baro_run`` mirrors Baro's events for the board (core/events_file.py)."""
+        try:
+            path = events_path(self._ctx.state.data_dir, run_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            return str(path)
+        except Exception:  # no plugin data dir: the board then updates via baro_status only
+            return None
 
     def endpoint_reachable(self, base_url: str) -> bool:
         """True when ``<base_url>/models`` answers. Only ever called for a URL on this machine."""

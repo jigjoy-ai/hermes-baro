@@ -221,3 +221,18 @@ def test_routes_over_http_when_fastapi_is_installed(api, populated_store):
 
     assert client.get("/api/plugins/baro/runs/not-a-run-id").status_code == 404
     assert client.get("/api/plugins/baro/runs/baro-20991231T000000Z-000000").status_code == 404
+
+
+def test_get_run_replays_the_mirrored_events_while_the_run_is_live(api, memory_store, tmp_path):
+    # The board must move while Baro works, not only when the model calls baro_status.
+    memory_store.data_dir = tmp_path
+    board = Board(run_id=NEW_RUN, goal="build it", repo="/tmp/repo", baro_version="0.130.0", status="running")
+    RunRepository(memory_store).save_board(board)
+    events = tmp_path / "events" / f"{NEW_RUN}.jsonl"
+    events.parent.mkdir(parents=True)
+    events.write_text(
+        '{"type":"init","protocol":3,"project":"p","stories":[{"id":"S1","title":"S1","depends_on":[]}],"runner":"m"}\n'
+        '{"type":"story_start","id":"S1","title":"S1"}\n'
+    )
+    served = api.get_run(NEW_RUN, memory_store)["board"]
+    assert [s["state"] for s in served["stories"]] == ["running"]
