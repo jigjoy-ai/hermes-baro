@@ -85,7 +85,7 @@ def populated_store(memory_store, load_fixture):
     """Two runs saved through RunRepository, the writer bridge.py uses."""
     repo = RunRepository(memory_store)
     for run_id in (OLD_RUN, NEW_RUN):
-        board = Board(run_id=run_id, goal="build it", repo="/tmp/repo", baro_version="0.129.0")
+        board = Board(run_id=run_id, goal="build it", repo="/tmp/repo", baro_version="0.130.0")
         for line in load_fixture("run_failure_blocks_dependents.jsonl"):
             board.apply_line(line, at="2026-11-05T14:22:33Z")
         repo.save_board(board)
