@@ -500,3 +500,12 @@ def test_unattended_status_still_allowed(load_fixture, repo):
     assert result["board"]["run_id"] == run_id
     assert bridge.calls_named("start_background") == []
     assert bridge.calls_named("kill") == []
+
+
+def test_failure_results_tell_the_model_baro_owns_the_work():
+    from baro_plugin.tools import BARO_OWNS_THE_WORK, error
+
+    assert error("dispatch_failed", "x")["instruction"] == BARO_OWNS_THE_WORK
+    assert error("plan_timeout", "x")["instruction"] == BARO_OWNS_THE_WORK
+    # Argument mistakes are the model's to fix, so they carry no such instruction.
+    assert "instruction" not in error("invalid_argument", "x")

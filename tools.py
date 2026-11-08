@@ -73,10 +73,39 @@ class DispatchError(Exception):
     """Hermes could not run the dispatched tool call."""
 
 
+# Read by the model with every result: when it uses Baro, Baro does the coding.
+# Without it, a failed run was followed by Hermes writing and testing the code
+# itself, asking the user to approve each command.
+BARO_OWNS_THE_WORK = (
+    "Baro does the coding for this goal. Do not write, edit or test code in this "
+    "repository yourself and do not carry out the goal another way. Tell the user "
+    "what happened and wait for their instructions."
+)
+_RUN_ACTIVE = (
+    "The run is in progress and Baro's agents are working in the repository. Do not "
+    "edit or test code there yourself; check again with baro_status."
+)
+
+# Errors about the request itself are for the model to fix; the rest end Baro's part.
+_ARGUMENT_ERRORS = ("invalid_argument", "unknown_run")
+
+
 def error(code: str, message: str) -> dict:
     if code not in ERROR_CODES:
         raise ValueError(f"unknown error code {code!r}")
-    return {"ok": False, "error": code, "message": message}
+    result = {"ok": False, "error": code, "message": message}
+    if code not in _ARGUMENT_ERRORS:
+        result["instruction"] = BARO_OWNS_THE_WORK
+    return result
+
+
+def _status_result(board: Any) -> dict:
+    result = {"ok": True, "board": board.to_dict()}
+    if board.status in ("failed", "cancelled"):
+        result["instruction"] = BARO_OWNS_THE_WORK
+    elif board.status not in TERMINAL_STATUSES:
+        result["instruction"] = _RUN_ACTIVE
+    return result
 
 
 _UNATTENDED_MESSAGE = (
@@ -123,7 +152,8 @@ TOOL_SCHEMAS: dict[str, dict] = {
         "description": (
             "Ask Baro to plan a software goal in a repository and return the plan "
             "as stories with dependency edges, without executing any story. Baro "
-            "is stopped as soon as the plan is known."
+            "is stopped as soon as the plan is known. Baro does the coding: never "
+            "implement the goal yourself, even if planning fails."
         ),
         "parameters": {
             "type": "object",
@@ -136,7 +166,10 @@ TOOL_SCHEMAS: dict[str, dict] = {
         "description": (
             "Start a Baro run for a software goal in a repository, as a background "
             "process. Coding agents then execute shell commands in that repository. "
-            "Returns a run id immediately; follow progress with baro_status."
+            "Returns a run id immediately; follow progress with baro_status. Baro "
+            "does all the coding: while the run is active and after it ends, do not "
+            "write, edit or test code in that repository yourself, and if it fails, "
+            "report the failure to the user instead of doing the work."
         ),
         "parameters": {
             "type": "object",
@@ -417,7 +450,7 @@ def handle_baro_status(bridge: Any, args: dict) -> dict:
     if err:
         return err
     if board.status in TERMINAL_STATUSES:
-        return {"ok": True, "board": board.to_dict()}
+        return _status_result(board)
 
     offset = handle.get("read_offset", 0)
     try:
@@ -444,7 +477,7 @@ def handle_baro_status(bridge: Any, args: dict) -> dict:
         run_id,
         {"process_id": handle["process_id"], "read_offset": max(offset, new_offset - len(remainder))},
     )
-    return {"ok": True, "board": board.to_dict()}
+    return _status_result(board)
 
 
 # ------------------------------------------------------------- baro_cancel

@@ -109,6 +109,12 @@ always has the shape `{"ok": false, "error": <code>, "message": <text>}`, where
 `<code>` is one of `invalid_argument`, `unattended_context`, `approval_denied`,
 `dispatch_failed`, `unknown_run` or `plan_timeout`.
 
+When Hermes uses Baro, Baro does the coding. Every failure other than
+`invalid_argument` and `unknown_run`, and the status of a run that failed, was
+cancelled or is still running, carries an `instruction` field that tells the
+model so: do not write, edit or test code in the repository itself, report the
+outcome and wait for the user.
+
 ### `baro_plan`
 
 Asks Baro for a plan and returns it as stories with dependency edges. It never
@@ -129,7 +135,7 @@ Result:
   "ok": true,
   "goal": "...",
   "repo": "/abs/path",
-  "baro_version": "0.128.0",
+  "baro_version": "0.129.0",
   "stories": [{"id": "S1", "title": "...", "depends_on": []},
               {"id": "S2", "title": "...", "depends_on": ["S1"]}],
   "edges": [{"from": "S1", "to": "S2"}],
@@ -163,8 +169,8 @@ Result:
   "ok": true,
   "run_id": "baro-20261105T142233Z-a1b2c3",
   "status": "running",
-  "baro_version": "0.128.0",
-  "command": "npx --yes baro-ai@0.128.0 --headless --cwd /abs/path --local-only 'the goal'"
+  "baro_version": "0.129.0",
+  "command": "npx --yes baro-ai@0.129.0 --headless --cwd /abs/path --local-only 'the goal'"
 }
 ```
 
@@ -188,7 +194,7 @@ Result: `{"ok": true, "board": <board>}`, where the board is:
   "run_id": "baro-20261105T142233Z-a1b2c3",
   "goal": "...",
   "repo": "/abs/path",
-  "baro_version": "0.128.0",
+  "baro_version": "0.129.0",
   "status": "running",
   "started_at": "2026-11-05T14:22:33Z",
   "ended_at": null,
@@ -320,15 +326,15 @@ sends and attaches your real credential itself, so Baro needs no
 unused.
 
 `model` names every Baro phase, the Critic and the Surgeon included. Tested
-with Baro 0.128.0 on the free `nous/welcome` tier, with no OpenAI key in the
+with Baro 0.129.0 on the free `nous/welcome` tier, with no OpenAI key in the
 environment: a small goal ran through planning, its stories, the Critic's
 reviews and the final test run.
 
 ## Pinned Baro version
 
 The plugin runs exactly one Baro release:
-`BARO_VERSION = "0.128.0"` in `core/command.py`, run as
-`npx --yes baro-ai@0.128.0`. There is no `latest` tag, no version range and no
+`BARO_VERSION = "0.129.0"` in `core/command.py`, run as
+`npx --yes baro-ai@0.129.0`. There is no `latest` tag, no version range and no
 update logic. `--headless` also turns off Baro's own updater and update check,
 so a run makes no network call to npm beyond the `npx` download. A new
 Baro version reaches users only through a reviewed change to `BARO_VERSION` and

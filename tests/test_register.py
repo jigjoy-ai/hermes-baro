@@ -102,7 +102,14 @@ def test_handler_returns_json_and_never_raises():
 
     # start_background's dispatch raises inside Hermes: surfaced as dispatch_failed JSON.
     started = json.loads(handlers["baro_run"]({"goal": "add a README", "repo": str(bridge_mod.__file__).rsplit("/", 1)[0]}))
-    assert started == {"ok": False, "error": "dispatch_failed", "message": started["message"]}
+    assert started == {
+        "ok": False,
+        "error": "dispatch_failed",
+        "message": started["message"],
+        "instruction": started["instruction"],
+    }
+    # A failed dispatch tells the model Baro owns the work, so it does not do it itself.
+    assert "Do not write, edit or test code" in started["instruction"]
     assert ctx.dispatched[0][0] == "terminal"
 
 
