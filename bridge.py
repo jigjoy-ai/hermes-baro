@@ -41,9 +41,12 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
+import urllib.request
 from typing import Any, Callable
 
 from .core.consent import launch_approval
+from .core.settings import SETTING_DEFAULTS
 from .tools import DISPATCH_FAILED, HANDLERS, TOOL_SCHEMAS, ApprovalDenied, DispatchError, error
 
 TOOLSET = "baro"
@@ -141,7 +144,27 @@ class HermesBridge:
             raise DispatchError(f"{tool} returned an unexpected result")
         return reply
 
-    def start_background(self, command: str, cwd: str) -> dict:
+    def settings(self) -> dict:
+        """This plugin's settings (``plugins.entries.baro.settings``, plugin.yaml config_schema)."""
+        values = {}
+        for key, default in SETTING_DEFAULTS.items():
+            try:
+                values[key] = self._ctx.get_config(key, default=default)
+            except Exception:  # an older Hermes without plugin settings
+                values[key] = default
+        return values
+
+    def endpoint_reachable(self, base_url: str) -> bool:
+        """True when ``<base_url>/models`` answers. Only ever called for a URL on this machine."""
+        try:
+            with urllib.request.urlopen(base_url.rstrip("/") + "/models", timeout=3) as reply:
+                return 200 <= reply.status < 500
+        except urllib.error.HTTPError as exc:
+            return exc.code < 500
+        except Exception:
+            return False
+
+    def start_background(self, command: str, cwd: str, notify_on_complete: bool = False) -> dict:
         """Start ``command`` in ``cwd`` as a Hermes background process. Returns ``{process_id}``.
 
         Dispatches the ``terminal`` tool with ``background: true`` and ``workdir``
@@ -150,7 +173,12 @@ class HermesBridge:
         ``session_id`` (tools/terminal_tool_background.py:184), which identifies the
         process to ``process_manage``.
         """
-        reply = self._dispatch("terminal", {"command": command, "background": True, "workdir": cwd})
+        args = {"command": command, "background": True, "workdir": cwd}
+        if notify_on_complete:
+            # Hermes tells the agent when Baro exits, so it waits for that
+            # instead of sleeping in the terminal and polling (tools/terminal_tool_background.py).
+            args["notify_on_complete"] = True
+        reply = self._dispatch("terminal", args)
         message = str(reply.get("error") or "")
         if reply.get("status") in _NOT_APPROVED:
             raise ApprovalDenied(message or f"Hermes did not run the command ({reply.get('status')})")

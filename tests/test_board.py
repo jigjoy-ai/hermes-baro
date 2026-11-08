@@ -255,3 +255,23 @@ def test_store_round_trips_board_and_handle(memory_store, load_fixture):
 def test_memory_store_rejects_non_json(memory_store):
     with pytest.raises(TypeError):
         memory_store.set("x", {1, 2})
+
+
+def test_dependency_suspension_and_retry_are_not_failures():
+    # Seen in Hermes Desktop: a docs story started early, found it needed the
+    # others, and paused; the board showed it as Failed.
+    lines = [
+        '{"type":"init","protocol":3,"project":"p","stories":[{"id":"S1","title":"S1","depends_on":[]},{"id":"S5","title":"Docs","depends_on":[]}],"runner":"m"}',
+        '{"type":"story_start","id":"S5","title":"Docs"}',
+        '{"type":"story_error","id":"S5","error":"suspended on dependency block block-ff6e","attempt":1,"max_retries":2}',
+        '{"type":"story_start","id":"S1","title":"S1"}',
+        '{"type":"story_error","id":"S1","error":"execution infrastructure failed in inference round 1","attempt":1,"max_retries":2}',
+    ]
+    board = feed(new_board(), lines)
+    s = stories(board)
+    assert s["S5"]["state"] in ("ready", "blocked")
+    assert s["S5"]["error"] is None
+    assert s["S1"]["state"] == "failed"
+    # Baro retries S1: a new start clears the failure.
+    board = feed(board, ['{"type":"story_start","id":"S1","title":"S1"}'])
+    assert stories(board)["S1"]["state"] == "running"

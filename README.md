@@ -118,7 +118,9 @@ outcome and wait for the user.
 ### `baro_plan`
 
 Asks Baro for a plan and returns it as stories with dependency edges. It never
-executes a story.
+executes a story. Its description tells the model to use it only when the user
+wants to see a plan without running it: `baro_run` plans as part of the run, and
+the plan appears on the Baro board.
 
 | Parameter | Type | Notes |
 | --- | --- | --- |
@@ -152,13 +154,18 @@ event that holds stories, and stops the process at once
 (`native_plan_only: false`). The stopped run leaves an empty `baro/<goal>`
 branch in the repository. If Baro starts a story before it reports a
 plan, the process is stopped and the tool returns `dispatch_failed`. If no plan
-arrives within 600 seconds, the process is stopped and the tool returns
-`plan_timeout`.
+arrives within 360 seconds, the process is stopped and the tool returns
+`plan_timeout`. That stays under Hermes's own deadline for one tool call
+(`timeouts.tools.sequential_call`, 420 seconds by default).
 
 ### `baro_run`
 
 Starts a Baro run in the background and returns at once. It does not wait for
-any output.
+any output. The process is started with `notify_on_complete`, so Hermes tells the
+model when Baro exits; the result's `instruction` asks the model not to poll or
+sleep in a loop meanwhile, while the user watches the Baro board. The goal is
+passed on as the user stated it: the description asks the model not to add
+methods or requirements of its own.
 
 Parameters: the same as `baro_plan`.
 
@@ -281,9 +288,12 @@ Read this before you install:
   [Autonomous by design, guarded by the harness](#autonomous-by-design-guarded-by-the-harness).
   The plugin never approves on your behalf and never turns a guard off.
 - **Network calls to configured model providers.** Baro calls the model provider
-  you configured for it (or the one you name with `llm` and `openai_base_url`).
-  `npx` also downloads the pinned Baro package from the npm registry on first
-  use. The plugin itself makes no other network calls and has no telemetry.
+  you configured for it (or the one you name with `llm` and `openai_base_url`,
+  or the Hermes subscription proxy when that setting is on). `npx` also
+  downloads the pinned Baro package from the npm registry on first use. The
+  plugin itself makes one other kind of call: before it starts Baro against a
+  base URL on this machine, it requests `<base URL>/models` there to check that
+  something answers. It calls nothing off this machine and has no telemetry.
 - **One long-running background process per run.** Each `baro_run` starts one
   background Baro process, managed by Hermes, which keeps running until the run
   ends or you call `baro_cancel`. Baro starts its own child agent processes
@@ -294,9 +304,8 @@ Read this before you install:
 
 ## Using the Hermes subscription proxy
 
-This section is documentation only. The plugin never defaults a backend, a URL
-or a model. Baro uses whatever backend you configured for it, unless you pass
-these arguments.
+Out of the box the plugin picks no backend, URL or model: Baro uses whatever
+backend you configured for it.
 
 To run Baro on your Hermes subscription, start the Hermes subscription proxy. It
 serves an OpenAI-compatible API at `http://127.0.0.1:8645/v1`:
@@ -305,7 +314,14 @@ serves an OpenAI-compatible API at `http://127.0.0.1:8645/v1`:
 hermes proxy start
 ```
 
-Then pass three tool arguments to `baro_plan` or `baro_run`:
+Then turn on **Settings → Plugins → Baro → Use my Hermes subscription** and pick
+the model your tier serves (`nous/welcome` by default). Every `baro_run` and
+`baro_plan` without a backend of its own then runs Baro on the proxy, so a
+request can be as plain as "use Baro to add a CLI to my notes API". If nothing
+answers at the proxy URL, the tool says to start the proxy instead of starting
+Baro.
+
+The same works per request, setting or not, with three tool arguments:
 
 ```json
 {

@@ -27,3 +27,22 @@ provides_tools:
   - baro_cancel
 provides_hooks:
   - pre_tool_call
+# Settings form under Settings → Plugins → Baro (index.md "Settings form in the
+# Desktop"); read through ctx.get_config in bridge.py. Off by default: the
+# plugin then picks no backend, URL or model (core/settings.py).
+config_schema:
+  hermes_subscription:
+    type: bool
+    default: false
+    label: "Use my Hermes subscription"
+    description: "Run Baro's agents on your Hermes subscription through the local proxy (start it with `hermes proxy start`). A backend named in the request still wins."
+  hermes_subscription_model:
+    type: str
+    default: "nous/welcome"
+    label: "Subscription model"
+    description: "Model Baro uses on the subscription; one your tier serves (the proxy's /v1/models lists them)."
+  hermes_proxy_url:
+    type: str
+    default: "http://127.0.0.1:8645/v1"
+    label: "Proxy URL"
+    description: "Where `hermes proxy start` listens."

@@ -15,6 +15,9 @@ from typing import Any
 from .events import BaroEvent, parse_line
 
 SCHEMA = 1
+# Baro reports a dependency suspension as a story_error with this text.
+_SUSPENDED_PREFIX = "suspended on dependency block"
+
 RUN_STATUSES = ("planning", "running", "completed", "failed", "cancelled")
 TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 STORY_STATES = ("blocked", "ready", "running", "done", "failed")
@@ -97,14 +100,23 @@ class Board:
             if story is None:
                 return
             if kind == "story_start":
+                # A retry or a resumed suspension starts the story again.
                 story.started = True
+                story.failed = False
+                story.error = None
                 self._promote_to_running()
             elif kind == "story_progress":
                 if event.message is not None:
                     story.last_progress = event.message
             elif kind == "story_complete":
                 story.completed = True
-            else:  # story_failed is terminal for the story
+            elif (event.error or "").startswith(_SUSPENDED_PREFIX):
+                # Not a failure: the story paused until stories it found it
+                # needs are done (a runtime replan adds those edges), then
+                # starts again. Shown as waiting, not as Failed.
+                story.started = False
+                story.last_progress = "waiting for the stories it depends on"
+            else:
                 story.failed = True
                 story.error = event.error
 

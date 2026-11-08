@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .core.board import TERMINAL_STATUSES, Board
+from .core.settings import is_local_url, subscription_backend
 from .core.command import (
     BARO_VERSION,
     PLAN_ONLY_FLAG,
@@ -59,7 +60,10 @@ ERROR_CODES = (
     PLAN_TIMEOUT,
 )
 
-PLAN_TIMEOUT_SECS = 600.0
+# Under Hermes's own deadline for one tool call (timeouts.tools.sequential_call,
+# 420 s by default): past it Hermes abandons the call and Desktop shows
+# "Result unavailable" while Baro keeps planning.
+PLAN_TIMEOUT_SECS = 360.0
 PLAN_POLL_SECS = 0.5
 MAX_OPTION_CHARS = 2000
 
@@ -89,8 +93,11 @@ BARO_OWNS_THE_WORK = (
     "what happened and wait for their instructions."
 )
 _RUN_ACTIVE = (
-    "The run is in progress and Baro's agents are working in the repository. Do not "
-    "edit or test code there yourself; check again with baro_status."
+    "The run is in progress and Baro's agents are working in the repository; the "
+    "user can watch it live on the Baro board. Hermes notifies you when Baro exits: "
+    "do not sleep in the terminal or poll baro_status in a loop while you wait, and "
+    "do not edit or test code in the repository yourself. When notified, call "
+    "baro_status once and report the outcome."
 )
 
 # Errors about the request itself are for the model to fix; the rest end Baro's part.
@@ -157,10 +164,11 @@ TOOL_SCHEMAS: dict[str, dict] = {
     "baro_plan": {
         "name": "baro_plan",
         "description": (
-            "Ask Baro to plan a software goal in a repository and return the plan "
-            "as stories with dependency edges, without executing any story. Baro "
-            "is stopped as soon as the plan is known. Baro does the coding: never "
-            "implement the goal yourself, even if planning fails."
+            "Only when the user asks to see a plan without running it: ask Baro to "
+            "plan a software goal and return the stories with their dependency "
+            "edges, without executing any. To carry out a goal, call baro_run "
+            "directly instead; it plans as part of the run. Baro does the coding: "
+            "never implement the goal yourself, even if planning fails."
         ),
         "parameters": {
             "type": "object",
@@ -171,12 +179,15 @@ TOOL_SCHEMAS: dict[str, dict] = {
     "baro_run": {
         "name": "baro_run",
         "description": (
-            "Start a Baro run for a software goal in a repository, as a background "
-            "process. Coding agents then execute shell commands in that repository. "
-            "Returns a run id immediately; follow progress with baro_status. Baro "
-            "does all the coding: while the run is active and after it ends, do not "
-            "write, edit or test code in that repository yourself, and if it fails, "
-            "report the failure to the user instead of doing the work."
+            "Carry out a software goal with Baro: it plans the goal into stories and "
+            "runs them with coding agents in the repository, as a background process. "
+            "Call it directly, without baro_plan first. Pass the goal as the user "
+            "stated it; do not add methods or requirements they did not ask for. "
+            "Returns a run id immediately; Hermes notifies you when Baro exits, and "
+            "the user watches progress on the Baro board, so do not poll in a loop. "
+            "Baro does all the coding: do not write, edit or test code in that "
+            "repository yourself, and if the run fails, report it instead of doing "
+            "the work."
         ),
         "parameters": {
             "type": "object",
@@ -211,8 +222,12 @@ TOOL_SCHEMAS: dict[str, dict] = {
 # ------------------------------------------------------------- validation
 
 
-def _goal_args(args: Any) -> tuple[dict | None, dict | None]:
-    """Return (validated values, None) or (None, error)."""
+def _goal_args(args: Any, bridge: Any = None) -> tuple[dict | None, dict | None]:
+    """Return (validated values, None) or (None, error).
+
+    With no backend in the arguments, the subscription setting (core/settings.py)
+    may supply one; a backend named in the call always wins.
+    """
     if not isinstance(args, dict):
         return None, error(INVALID_ARGUMENT, "arguments must be an object")
     goal, repo = args.get("goal"), args.get("repo")
@@ -244,6 +259,19 @@ def _goal_args(args: Any) -> tuple[dict | None, dict | None]:
         if value.startswith("-"):
             return None, error(INVALID_ARGUMENT, f"{name} must not start with '-'")
         values[name] = value
+    if bridge is not None and not any(values[n] for n in ("llm", "openai_base_url", "model")):
+        settings_of = getattr(bridge, "settings", None)
+        implied = subscription_backend(settings_of()) if callable(settings_of) else None
+        if implied:
+            values.update(implied)
+    url = values["openai_base_url"]
+    probe = getattr(bridge, "endpoint_reachable", None)
+    if url and is_local_url(url) and callable(probe) and not probe(url):
+        return None, error(
+            DISPATCH_FAILED,
+            f"Nothing answers at {url}. If this is the Hermes subscription proxy, "
+            "start it with `hermes proxy start` and try again.",
+        )
     return values, None
 
 
@@ -271,10 +299,16 @@ def _command(values: dict, *, plan_only: bool = False) -> str:
 # --------------------------------------------------------------- dispatch
 
 
-def _start(bridge: Any, command: str, cwd: str) -> tuple[str | None, dict | None]:
+def _start(
+    bridge: Any, command: str, cwd: str, notify_on_complete: bool = False
+) -> tuple[str | None, dict | None]:
     """Start the command through the bridge. Return (process_id, None) or (None, error)."""
     try:
-        handle = bridge.start_background(command, cwd)
+        handle = (
+            bridge.start_background(command, cwd, notify_on_complete=True)
+            if notify_on_complete
+            else bridge.start_background(command, cwd)
+        )
     except ApprovalDenied as exc:
         return None, error(APPROVAL_DENIED, f"Starting Baro was not approved: {exc}")
     except DispatchError as exc:
@@ -346,7 +380,7 @@ def handle_baro_plan(bridge: Any, args: dict) -> dict:
     """
     if bridge.is_unattended():
         return error(UNATTENDED_CONTEXT, _UNATTENDED_MESSAGE.format(tool="baro_plan"))
-    values, err = _goal_args(args)
+    values, err = _goal_args(args, bridge)
     if err:
         return err
     native = PLAN_ONLY_FLAG is not None
@@ -396,7 +430,8 @@ def handle_baro_plan(bridge: Any, args: dict) -> dict:
                 error(
                     PLAN_TIMEOUT,
                     f"Baro reported no plan within {int(PLAN_TIMEOUT_SECS)} seconds; "
-                    "the process was stopped",
+                    "the process was stopped. To carry out the goal, use baro_run: it "
+                    "plans as part of the run and the plan appears on the Baro board.",
                 ),
                 False,
             )
@@ -411,11 +446,11 @@ def handle_baro_run(bridge: Any, args: dict) -> dict:
     """Start Baro in the background and return a run id at once (no output is read)."""
     if bridge.is_unattended():
         return error(UNATTENDED_CONTEXT, _UNATTENDED_MESSAGE.format(tool="baro_run"))
-    values, err = _goal_args(args)
+    values, err = _goal_args(args, bridge)
     if err:
         return err
     command = _command(values)
-    process_id, err = _start(bridge, command, values["repo"])
+    process_id, err = _start(bridge, command, values["repo"], notify_on_complete=True)
     if err:
         return err
     run_id = new_run_id()
@@ -436,6 +471,7 @@ def handle_baro_run(bridge: Any, args: dict) -> dict:
         "status": "running",
         "baro_version": BARO_VERSION,
         "command": command,
+        "instruction": _RUN_ACTIVE,
     }
 
 

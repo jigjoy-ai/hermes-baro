@@ -49,7 +49,13 @@ class FakeBridge:
         read_error: Exception | None = None,
         process_id: str = "proc-1",
         store: MemoryStore | None = None,
+        settings: dict | None = None,
+        reachable: bool = True,
     ) -> None:
+        self.notify_flags: list[bool] = []
+        self._settings = dict(settings or {})
+        self._reachable = reachable
+        self.probed: list[str] = []
         self.chunks = list(chunks or [])
         self.exit_at_end = exit_at_end
         self.unattended = unattended
@@ -70,8 +76,16 @@ class FakeBridge:
         self.calls.append(("is_unattended",))
         return self.unattended
 
-    def start_background(self, command: str, cwd: str) -> dict:
+    def settings(self) -> dict:
+        return dict(self._settings)
+
+    def endpoint_reachable(self, base_url: str) -> bool:
+        self.probed.append(base_url)
+        return self._reachable
+
+    def start_background(self, command: str, cwd: str, notify_on_complete: bool = False) -> dict:
         self.calls.append(("start_background", command, cwd))
+        self.notify_flags.append(notify_on_complete)
         if self.start_error is not None:
             raise self.start_error
         return {"process_id": self.process_id}

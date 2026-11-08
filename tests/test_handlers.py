@@ -534,3 +534,51 @@ def test_run_command_carries_the_bare_base_url(tmp_path):
     command = tools._command(values)
     assert "--openai-base-url http://127.0.0.1:8645/v1" in command
     assert "@url" not in command
+
+
+# ------------------------------------------------- found in Hermes Desktop, 2026-11-08
+
+
+def test_run_asks_hermes_to_notify_on_exit_and_says_not_to_poll(repo):
+    bridge = FakeBridge()
+    result = tools.handle_baro_run(bridge, {"goal": "Add a health endpoint", "repo": repo})
+    assert result["ok"] is True
+    # Without the notification Hermes slept 60 s in the terminal between status polls.
+    assert bridge.notify_flags == [True]
+    assert "do not sleep in the terminal" in result["instruction"]
+
+
+def test_plan_does_not_ask_for_a_notification(repo):
+    bridge = FakeBridge(chunks_by_line([
+        '{"type":"init","protocol":3,"project":"p","stories":[{"id":"S1","title":"S1","depends_on":[]}],"runner":"m"}',
+    ]))
+    tools.handle_baro_plan(bridge, {"goal": "Add a health endpoint", "repo": repo})
+    assert bridge.notify_flags == [False]
+
+
+def test_subscription_setting_supplies_the_proxy_backend(repo):
+    bridge = FakeBridge(settings={"hermes_subscription": True, "hermes_subscription_model": "nous/welcome",
+                                  "hermes_proxy_url": "http://127.0.0.1:8645/v1"})
+    result = tools.handle_baro_run(bridge, {"goal": "Add a health endpoint", "repo": repo})
+    assert "--llm openai --openai-base-url http://127.0.0.1:8645/v1 --model nous/welcome" in result["command"]
+    assert bridge.probed == ["http://127.0.0.1:8645/v1"]
+
+
+def test_backend_named_in_the_call_wins_over_the_setting(repo):
+    bridge = FakeBridge(settings={"hermes_subscription": True})
+    result = tools.handle_baro_run(bridge, {"goal": "Add a health endpoint", "repo": repo, "llm": "claude"})
+    assert "--llm claude" in result["command"]
+    assert "--openai-base-url" not in result["command"]
+
+
+def test_setting_off_picks_no_backend(repo):
+    result = tools.handle_baro_run(FakeBridge(), {"goal": "Add a health endpoint", "repo": repo})
+    assert "--llm" not in result["command"]
+
+
+def test_proxy_not_running_is_reported_before_baro_starts(repo):
+    bridge = FakeBridge(settings={"hermes_subscription": True}, reachable=False)
+    result = tools.handle_baro_run(bridge, {"goal": "Add a health endpoint", "repo": repo})
+    assert result["error"] == "dispatch_failed"
+    assert "hermes proxy start" in result["message"]
+    assert bridge.calls_named("start_background") == []
