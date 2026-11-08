@@ -31,7 +31,14 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .core.board import TERMINAL_STATUSES, Board
-from .core.command import BARO_VERSION, PLAN_ONLY_FLAG, build_command, validate_args
+from .core.command import (
+    BARO_VERSION,
+    PLAN_ONLY_FLAG,
+    build_command,
+    normalize_base_url,
+    unwrap_references,
+    validate_args,
+)
 from .core.events import BaroEvent, LineBuffer, parse_line
 from .core.ids import RUN_ID_RE, new_run_id
 from .core.store import RunRepository
@@ -209,6 +216,8 @@ def _goal_args(args: Any) -> tuple[dict | None, dict | None]:
     if not isinstance(args, dict):
         return None, error(INVALID_ARGUMENT, "arguments must be an object")
     goal, repo = args.get("goal"), args.get("repo")
+    if isinstance(goal, str):
+        goal = unwrap_references(goal)
     try:
         validate_args(goal, repo)
     except ValueError as exc:
@@ -226,6 +235,12 @@ def _goal_args(args: Any) -> tuple[dict | None, dict | None]:
                 INVALID_ARGUMENT,
                 f"{name} must have no NUL and at most {MAX_OPTION_CHARS} characters",
             )
+        value = unwrap_references(value)
+        if name == "openai_base_url":
+            try:
+                value = normalize_base_url(value)
+            except ValueError as exc:
+                return None, error(INVALID_ARGUMENT, str(exc))
         if value.startswith("-"):
             return None, error(INVALID_ARGUMENT, f"{name} must not start with '-'")
         values[name] = value

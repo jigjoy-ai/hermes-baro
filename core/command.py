@@ -33,6 +33,7 @@ backend its user configured (cli.rs:217 defaults ``--llm`` itself).
 from __future__ import annotations
 
 import os
+import re
 import shlex
 
 # packages/baro-app/package.json:3 (exact version, no range).
@@ -105,6 +106,26 @@ def build_command(
         parts.append(PLAN_ONLY_FLAG)
     parts.append(shlex.quote(goal))
     return " ".join(parts)
+
+
+# Hermes Desktop turns a URL in the user's message into an `@url:` reference,
+# and the model copies that markup into tool arguments: Baro then got
+# --openai-base-url '@url:`<the proxy URL>`' and a goal with the same markup.
+_URL_REFERENCE = re.compile(r"@url:(?:`([^`\s]+)`|(https?://\S+))")
+_HTTP_URL = re.compile(r"https?://[^\s`'\"]+")
+
+
+def unwrap_references(text: str) -> str:
+    """Replace each Hermes ``@url:`` reference in ``text`` with the bare URL."""
+    return _URL_REFERENCE.sub(lambda m: m.group(1) or m.group(2), text)
+
+
+def normalize_base_url(value: str) -> str:
+    """Return ``value`` as a bare http(s) URL, or raise ``ValueError``."""
+    url = unwrap_references(value).strip().strip("`'\"")
+    if not _HTTP_URL.fullmatch(url):
+        raise ValueError(f"openai_base_url must be an http(s) URL, got {value!r}")
+    return url
 
 
 def validate_args(goal: object, repo: object) -> None:

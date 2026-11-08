@@ -509,3 +509,28 @@ def test_failure_results_tell_the_model_baro_owns_the_work():
     assert error("plan_timeout", "x")["instruction"] == BARO_OWNS_THE_WORK
     # Argument mistakes are the model's to fix, so they carry no such instruction.
     assert "instruction" not in error("invalid_argument", "x")
+
+
+def test_hermes_url_references_are_unwrapped_before_baro_sees_them():
+    from baro_plugin.core.command import normalize_base_url, unwrap_references
+
+    # What Hermes Desktop sent on 2026-11-08: the URL as an @url: chip.
+    assert normalize_base_url("@url:`http://127.0.0.1:8645/v1`") == "http://127.0.0.1:8645/v1"
+    assert normalize_base_url("http://127.0.0.1:8645/v1") == "http://127.0.0.1:8645/v1"
+    assert unwrap_references("default @url:`http://localhost:3000`), with tests") == "default http://localhost:3000), with tests"
+    with pytest.raises(ValueError):
+        normalize_base_url("127.0.0.1:8645")
+
+
+def test_run_command_carries_the_bare_base_url(tmp_path):
+    values, err = tools._goal_args({
+        "goal": "Use NOTES_URL, default @url:`http://localhost:3000`",
+        "repo": str(tmp_path),
+        "llm": "openai",
+        "openai_base_url": "@url:`http://127.0.0.1:8645/v1`",
+        "model": "nous/welcome",
+    })
+    assert err is None
+    command = tools._command(values)
+    assert "--openai-base-url http://127.0.0.1:8645/v1" in command
+    assert "@url" not in command
