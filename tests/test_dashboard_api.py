@@ -261,3 +261,19 @@ def test_activity_says_what_each_agent_is_doing(api, memory_store, tmp_path):
     assert s1["model"] == "openai:nous/welcome"
     assert [step["kind"] for step in s1["steps"]] == ["start", "run", "file"]
     assert s1["files"] == ["lib/a.mjs"]
+
+
+def test_activity_narrates_the_planning_phase(api, memory_store, tmp_path):
+    memory_store.data_dir = tmp_path
+    RunRepository(memory_store).save_board(
+        Board(run_id=NEW_RUN, goal="build it", repo="/tmp/repo", baro_version="0.130.0", status="running"))
+    events = tmp_path / "events" / f"{NEW_RUN}.jsonl"
+    events.parent.mkdir(parents=True)
+    events.write_text("\n".join([
+        '{"type":"story_log","id":"plan","line":"sizing the goal before the Architect"}',
+        '{"type":"story_log","id":"plan","line":"scout dispatched: Which module owns notes?"}',
+        '{"type":"story_log","id":"plan","line":"Architect is still validating repository evidence"}',
+    ]) + "\n")
+    activity = api.get_activity(NEW_RUN, memory_store)["activity"]
+    assert [s["text"] for s in activity["plan_steps"]] == ["Sizing the goal", "Scout asked: Which module owns notes?"]
+    assert activity["phase"]["index"] == 1

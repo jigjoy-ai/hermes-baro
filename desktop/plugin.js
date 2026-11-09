@@ -265,6 +265,7 @@ function ActivityBar({ board, activity }) {
       working + (working === 1 ? ' agent working' : ' agents working'))
   )
   chips.push(h('span', { key: 'done', style: styles.chip }, (agents.done || 0) + ' of ' + (agents.total || 0) + ' stories done'))
+  if ((agents.total || 0) === 0) return h('div', { style: styles.bar }, chips.slice(0, 0))
   if (activity.elapsed_secs) {
     const m = Math.floor(activity.elapsed_secs / 60)
     chips.push(h('span', { key: 'time', style: styles.chip }, m + ' min ' + (activity.elapsed_secs % 60) + ' s'))
@@ -273,6 +274,47 @@ function ActivityBar({ board, activity }) {
     chips.push(h('span', { key: 'plan', style: styles.meta, title: activity.plan_note }, 'Planning: ' + cardNote(activity.plan_note)))
   }
   return h('div', { style: styles.bar }, chips)
+}
+
+function elapsedSince(iso) {
+  const start = Date.parse(iso || '')
+  if (!start) return null
+  const secs = Math.max(0, Math.floor((Date.now() - start) / 1000))
+  return Math.floor(secs / 60) + ' min ' + (secs % 60) + ' s'
+}
+
+// Before any story exists: the phases and what the planner is doing, live.
+function PlanningView({ board, activity }) {
+  const phase = (activity && activity.phase) || { index: 0, names: ['Understanding the goal', 'Architect', 'Acceptance checks', 'Planning stories'] }
+  const steps = (activity && activity.plan_steps) || []
+  const since = elapsedSince(board && board.started_at)
+  const stepper = phase.names.map((name, i) => {
+    const current = i === phase.index
+    const past = i < phase.index
+    return h(
+      'span',
+      { key: name, style: Object.assign({}, styles.chip, current ? styles.chipLive : null, past ? { opacity: 0.6 } : null) },
+      (past ? '✓ ' : current ? '● ' : '') + name
+    )
+  })
+  const rows = [
+    h('div', { key: 'title', style: styles.title }, 'Planning' + (since ? ' · ' + since : '')),
+    h('div', { key: 'stepper', style: styles.bar }, stepper)
+  ]
+  if (steps.length === 0) {
+    rows.push(h('div', { key: 'wait', style: styles.muted }, 'Baro is reading the goal and the repository…'))
+  } else {
+    steps
+      .slice()
+      .reverse()
+      .forEach((step, i) =>
+        rows.push(
+          h('div', { key: 'p' + i, style: Object.assign({}, styles.step, i === 0 ? null : { opacity: 0.7 }) },
+            h('span', { style: styles.stepText }, step.text))
+        )
+      )
+  }
+  return h('div', { style: Object.assign({}, styles.panel, { flex: 1 }) }, rows)
 }
 
 // Everything one agent did, newest last.
@@ -466,6 +508,8 @@ function BaroBoardPage({ ctx }) {
     body = h('div', { style: styles.muted }, 'No Baro runs yet. Start one with the baro_run tool.')
   } else if (!board) {
     body = h('div', { style: styles.muted }, 'Loading ' + selected + '…')
+  } else if (stories.length === 0 && isLiveStatus(board.status)) {
+    body = h(PlanningView, { board, activity })
   } else {
     const agents = (activity && activity.stories) || {}
     const columns = h(

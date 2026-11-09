@@ -73,10 +73,35 @@ def _step(story: dict, at: str | None, kind: str, text: str) -> None:
     story["last_step"] = entry
 
 
+# What the plan lane says, put plainly for the planning view.
+_PLAN_PHRASES = (
+    (re.compile(r"^sizing the goal"), "Sizing the goal"),
+    (re.compile(r"^validating the candidate goal"), "Architect: checking the goal against the repository"),
+    (re.compile(r"^scout dispatched: (.*)"), "Scout asked: {0}"),
+    (re.compile(r"^scout answered: (.*?)(?: — .*)?$"), "Scout answered: {0}"),
+    (re.compile(r"^scout FAILED: (.*)"), "Scout could not answer: {0}"),
+    (re.compile(r"^Architect is still validating"), None),
+    (re.compile(r"^architecture obligations: batch started \(batch=(\d+)"), "Writing acceptance checks, part {0}"),
+    (re.compile(r"^architecture obligations: batch completed \(batch=(\d+).*obligations=(\d+)"),
+     "Acceptance checks part {0} done ({1})"),
+)
+_PHASES = ("Understanding the goal", "Architect", "Acceptance checks", "Planning stories")
+
+
+def _plan_phrase(line: str) -> str | None:
+    for pattern, template in _PLAN_PHRASES:
+        found = pattern.search(line)
+        if found:
+            return template.format(*found.groups()) if template else None
+    return line
+
+
 def summarize(text: str) -> dict:
     """Agents and their recent steps, from the mirrored stdout of one Baro run."""
     stories: dict[str, dict] = {}
     plan_note = None
+    plan_steps: list[dict] = []
+    phase = 0
     first = last = None
     for raw in text.splitlines():
         try:
@@ -94,7 +119,21 @@ def summarize(text: str) -> dict:
         sid = event.get("id") if isinstance(event.get("id"), str) else ""
         story_lane = bool(re.fullmatch(r"S\d+", sid))
         if kind == "story_log" and sid == "plan":
-            plan_note = _short(event.get("line", ""))
+            line = str(event.get("line", ""))
+            plan_note = _short(line)
+            phrase = _plan_phrase(line)
+            if phrase:
+                plan_steps.append({"at": at, "text": _short(phrase)})
+                del plan_steps[:-MAX_STEPS]
+            if line.startswith(("validating the candidate goal", "scout ")):
+                phase = max(phase, 1)
+            elif line.startswith("architecture obligations"):
+                phase = max(phase, 2)
+        elif kind == "architect_complete":
+            phase = max(phase, 3)
+            plan_steps.append({"at": at, "text": "Architect done: design decisions written; planning the stories"})
+        elif kind == "init" and isinstance(event.get("stories"), list) and event["stories"]:
+            plan_steps.append({"at": at, "text": f"Plan ready: {len(event['stories'])} stories"})
         if not story_lane:
             continue
         story = _story(stories, sid)
@@ -143,6 +182,8 @@ def summarize(text: str) -> dict:
     return {
         "agents": {"working": working, "done": done, "total": len(stories)},
         "plan_note": plan_note,
+        "plan_steps": plan_steps,
+        "phase": {"index": phase, "names": list(_PHASES)},
         "elapsed_secs": int((last - first).total_seconds()) if first and last else 0,
         "stories": stories,
     }
