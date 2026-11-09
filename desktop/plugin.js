@@ -149,6 +149,29 @@ const styles = {
     fontSize: '0.8125rem'
   },
   cardTitle: { fontWeight: 500, color: 'var(--ui-text-primary)' },
+  bar: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', fontSize: '0.8125rem' },
+  chip: {
+    border: '1px solid var(--ui-stroke-secondary)',
+    borderRadius: '999px',
+    padding: '1px 8px',
+    color: 'var(--ui-text-secondary)'
+  },
+  chipLive: { border: '1px solid var(--ui-accent)', color: 'var(--ui-accent)' },
+  layout: { display: 'flex', gap: '12px', flex: 1, minHeight: 0 },
+  panel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+    flex: '0 0 340px',
+    border: '1px solid var(--ui-stroke-secondary)',
+    borderRadius: '8px',
+    padding: '10px',
+    overflowY: 'auto',
+    fontSize: '0.8125rem'
+  },
+  step: { display: 'flex', gap: '6px', alignItems: 'baseline' },
+  stepKind: { flex: '0 0 44px', color: 'var(--ui-text-tertiary)', fontSize: '0.6875rem', textTransform: 'uppercase' },
+  stepText: { color: 'var(--ui-text-primary)', wordBreak: 'break-word', whiteSpace: 'pre-wrap' },
   badge: {
     alignSelf: 'flex-start',
     border: '1px solid var(--ui-accent)',
@@ -170,10 +193,12 @@ function cardNote(text) {
   return sentence.length > CARD_NOTE_CHARS ? sentence.slice(0, CARD_NOTE_CHARS - 1).trimEnd() + '…' : sentence
 }
 
-function StoryCard({ story }) {
+const STEP_LABEL = { start: 'start', run: 'runs', say: 'says', file: 'file', test: 'test', verdict: 'critic', done: 'done', pause: 'waits', error: 'error' }
+
+function StoryCard({ story, agent, selected, onOpen }) {
   const children = [
     h('div', { key: 'title', style: styles.cardTitle }, story.title || story.id),
-    h('div', { key: 'id', style: styles.muted }, story.id),
+    h('div', { key: 'id', style: styles.muted }, story.id + (agent && agent.model ? ' · ' + agent.model : ''))
     h('div', { key: 'waits', style: styles.meta }, 'Waits on: ' + joinIds(story.waits_on)),
     h('div', { key: 'blocks', style: styles.meta }, 'Blocks: ' + joinIds(story.blocks))
   ]
@@ -183,20 +208,86 @@ function StoryCard({ story }) {
   if (story.error) {
     children.push(h('div', { key: 'error', style: Object.assign({}, styles.error, styles.clamp), title: story.error }, story.error))
   }
-  if (story.last_progress) {
+  const step = agent && agent.last_step
+  if (step) {
+    const text = (STEP_LABEL[step.kind] || step.kind) + ': ' + step.text
+    children.push(h('div', { key: 'step', style: Object.assign({}, styles.meta, styles.clamp), title: text }, cardNote(text)))
+  } else if (story.last_progress) {
     children.push(h('div', { key: 'progress', style: styles.muted, title: story.last_progress }, cardNote(story.last_progress)))
   }
-  return h('div', { style: styles.card, 'data-story-id': story.id, 'data-story-state': story.state }, children)
+  const style = Object.assign({}, styles.card, { cursor: 'pointer' }, selected ? { borderColor: 'var(--ui-accent)' } : null)
+  return h(
+    'div',
+    {
+      style,
+      role: 'button',
+      tabIndex: 0,
+      onClick: () => onOpen(story.id),
+      onKeyDown: e => (e.key === 'Enter' ? onOpen(story.id) : null),
+      'data-story-id': story.id,
+      'data-story-state': story.state
+    },
+    children
+  )
 }
 
-function Column({ column, stories }) {
+// Agents at work, and what the planner is on before any story exists.
+function ActivityBar({ board, activity }) {
+  if (!activity) return null
+  const agents = activity.agents || {}
+  const live = board && isLiveStatus(board.status)
+  const chips = []
+  const working = agents.working || 0
+  chips.push(
+    h('span', { key: 'working', style: Object.assign({}, styles.chip, working > 0 ? styles.chipLive : null) },
+      working + (working === 1 ? ' agent working' : ' agents working'))
+  )
+  chips.push(h('span', { key: 'done', style: styles.chip }, (agents.done || 0) + ' of ' + (agents.total || 0) + ' stories done'))
+  if (activity.elapsed_secs) {
+    const m = Math.floor(activity.elapsed_secs / 60)
+    chips.push(h('span', { key: 'time', style: styles.chip }, m + ' min ' + (activity.elapsed_secs % 60) + ' s'))
+  }
+  if (live && (agents.total || 0) === 0 && activity.plan_note) {
+    chips.push(h('span', { key: 'plan', style: styles.meta, title: activity.plan_note }, 'Planning: ' + cardNote(activity.plan_note)))
+  }
+  return h('div', { style: styles.bar }, chips)
+}
+
+// Everything one agent did, newest last.
+function AgentPanel({ story, agent, onClose }) {
+  const rows = [
+    h('div', { key: 'head', style: styles.header },
+      h('span', { style: styles.title }, story ? story.title || story.id : ''),
+      h('button', { type: 'button', style: styles.button, onClick: onClose }, 'Close'))
+  ]
+  if (!agent) {
+    rows.push(h('div', { key: 'none', style: styles.muted }, 'No agent has worked on this story yet.'))
+    return h('div', { style: styles.panel }, rows)
+  }
+  const facts = [agent.model, agent.attempt ? 'attempt ' + agent.attempt : null, agent.status].filter(Boolean)
+  rows.push(h('div', { key: 'facts', style: styles.meta }, facts.join(' · ')))
+  if (agent.verdict) rows.push(h('div', { key: 'verdict', style: styles.meta, title: agent.verdict }, 'Critic: ' + cardNote(agent.verdict)))
+  if (agent.files && agent.files.length) rows.push(h('div', { key: 'files', style: styles.muted }, 'Files: ' + agent.files.join(', ')))
+  ;(agent.steps || []).forEach((step, i) => {
+    rows.push(
+      h('div', { key: 'step' + i, style: styles.step },
+        h('span', { style: styles.stepKind }, STEP_LABEL[step.kind] || step.kind),
+        h('span', { style: styles.stepText }, step.text))
+    )
+  })
+  return h('div', { style: styles.panel }, rows)
+}
+
+function Column({ column, stories, agents, openId, onOpen }) {
   return h(
     'div',
     { style: styles.column, 'data-column': column.state },
     h('div', { style: styles.columnTitle }, column.title + ' (' + stories.length + ')'),
     stories.length === 0
       ? h('div', { style: styles.muted }, EMPTY)
-      : stories.map(story => h(StoryCard, { key: story.id, story }))
+      : stories.map(story =>
+          h(StoryCard, { key: story.id, story, agent: agents[story.id] || null, selected: story.id === openId, onOpen })
+        )
   )
 }
 
@@ -243,6 +334,8 @@ function BaroBoardPage({ ctx }) {
   const [runs, setRuns] = useState([])
   const [selected, setSelected] = useState(null)
   const [board, setBoard] = useState(null)
+  const [activity, setActivity] = useState(null)
+  const [openId, setOpenId] = useState(null)
   const [error, setError] = useState(null)
   // Becomes false once the user picks a run, so a refresh no longer moves the
   // picker to the newest run.
@@ -285,6 +378,13 @@ function BaroBoardPage({ ctx }) {
           publishedSeq.current = seq
           setBoard(normaliseBoard(payload))
           setError(null)
+          // Best effort: the board stands on its own if this read fails.
+          return ctx
+            .rest('/runs/' + encodeURIComponent(runId) + '/activity', { timeoutMs: REQUEST_TIMEOUT_MS })
+            .then(more => {
+              if (runId === selectedRef.current) setActivity(more && more.activity ? more.activity : null)
+            })
+            .catch(() => {})
         })
         .catch(err => {
           if (!mayPublish()) return
@@ -303,6 +403,8 @@ function BaroBoardPage({ ctx }) {
   // Load the board whenever the selected run changes.
   useEffect(() => {
     setBoard(null)
+    setActivity(null)
+    setOpenId(null)
     if (selected) loadBoard(selected)
   }, [selected, loadBoard])
 
@@ -340,17 +442,25 @@ function BaroBoardPage({ ctx }) {
   } else if (!board) {
     body = h('div', { style: styles.muted }, 'Loading ' + selected + '…')
   } else {
-    body = h(
+    const agents = (activity && activity.stories) || {}
+    const columns = h(
       'div',
       { style: styles.board },
-      COLUMNS.map(column => h(Column, { key: column.state, column, stories: groups[column.state] }))
+      COLUMNS.map(column =>
+        h(Column, { key: column.state, column, stories: groups[column.state], agents, openId, onOpen: setOpenId })
+      )
     )
+    const open = openId ? stories.find(s => s.id === openId) : null
+    body = open
+      ? h('div', { style: styles.layout }, columns, h(AgentPanel, { story: open, agent: agents[openId] || null, onClose: () => setOpenId(null) }))
+      : columns
   }
 
   return h(
     'div',
     { style: styles.page },
     h(BoardHeader, { board, runs, selected, onSelect, onRefresh, error }),
+    h(ActivityBar, { board, activity }),
     body
   )
 }

@@ -5,6 +5,7 @@ desktop/plugin.js reaches this module through ``ctx.rest`` and expects
 
     GET /runs        -> {"runs": [run_id, ...]}       storage key ``runs``, oldest first
     GET /runs/<id>   -> {"board": Board.to_dict()}    storage key ``run:<id>``
+    GET /runs/<id>/activity -> {"activity": core.activity.summarize(...)}
 
 Sources followed:
 - reference-hermes-agent/website/docs/developer-guide/desktop-plugin-sdk.md:2130-2152
@@ -75,6 +76,7 @@ _load_core()
 from hermes_dashboard_plugin_baro_core.ids import RUN_ID_RE  # noqa: E402
 from hermes_dashboard_plugin_baro_core.store import RunRepository  # noqa: E402
 from hermes_dashboard_plugin_baro_core.events_file import events_path, live_board  # noqa: E402
+from hermes_dashboard_plugin_baro_core.activity import summarize  # noqa: E402
 
 router = APIRouter()
 
@@ -99,6 +101,16 @@ def get_run(run_id: str, store: Any = Depends(get_store)) -> dict:
     if board is None:
         raise HTTPException(status_code=404, detail="unknown run")
     return {"board": live_board(board, _events_text(store, run_id)).to_dict()}
+
+
+@router.get("/runs/{run_id}/activity")
+def get_activity(run_id: str, store: Any = Depends(get_store)) -> dict:
+    """What each agent is doing (core/activity.py), from the run's mirrored events."""
+    if not isinstance(run_id, str) or re.fullmatch(RUN_ID_RE, run_id) is None:
+        raise HTTPException(status_code=404, detail="unknown run")
+    if RunRepository(store).load_board(run_id) is None:
+        raise HTTPException(status_code=404, detail="unknown run")
+    return {"activity": summarize(_events_text(store, run_id))}
 
 
 def _events_text(store: Any, run_id: str) -> str:

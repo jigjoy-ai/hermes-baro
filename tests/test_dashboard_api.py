@@ -68,7 +68,8 @@ def api(monkeypatch):
     if not REAL_FASTAPI:
         monkeypatch.setitem(sys.modules, "fastapi", _fastapi_stub())
     for name in (MODULE, CORE_MODULE, CORE_MODULE + ".ids", CORE_MODULE + ".store",
-                 CORE_MODULE + ".board", CORE_MODULE + ".events"):
+                 CORE_MODULE + ".board", CORE_MODULE + ".events",
+                 CORE_MODULE + ".events_file", CORE_MODULE + ".activity"):
         monkeypatch.delitem(sys.modules, name, raising=False)
     spec = importlib.util.spec_from_file_location(MODULE, API_FILE)
     module = importlib.util.module_from_spec(spec)
@@ -96,9 +97,9 @@ def _status(exc_info):
     return exc_info.value.status_code
 
 
-def test_router_exposes_the_two_read_only_routes(api):
+def test_router_exposes_the_read_only_routes(api):
     routes = {(route.path, tuple(sorted(route.methods))) for route in api.router.routes}
-    assert routes == {("/runs", ("GET",)), ("/runs/{run_id}", ("GET",))}
+    assert routes == {("/runs", ("GET",)), ("/runs/{run_id}", ("GET",)), ("/runs/{run_id}/activity", ("GET",))}
 
 
 def test_list_runs_returns_ids_oldest_first_from_runs_key(api, populated_store):
@@ -236,3 +237,27 @@ def test_get_run_replays_the_mirrored_events_while_the_run_is_live(api, memory_s
     )
     served = api.get_run(NEW_RUN, memory_store)["board"]
     assert [s["state"] for s in served["stories"]] == ["running"]
+
+
+def test_activity_says_what_each_agent_is_doing(api, memory_store, tmp_path):
+    memory_store.data_dir = tmp_path
+    RunRepository(memory_store).save_board(
+        Board(run_id=NEW_RUN, goal="build it", repo="/tmp/repo", baro_version="0.130.0", status="running"))
+    events = tmp_path / "events" / f"{NEW_RUN}.jsonl"
+    events.parent.mkdir(parents=True)
+    wt = "/private/var/folders/x/T/baro-worktrees/run-1/S1/repo/"
+    events.write_text("\n".join([
+        '{"type":"story_log","id":"plan","line":"Architect is validating the goal","ts":"2026-11-09T10:00:00Z"}',
+        '{"type":"story_start","id":"S1","title":"S1","ts":"2026-11-09T10:01:00Z"}',
+        '{"type":"story_log","id":"S1","line":"[collective] lease granted to story-worker:openai → openai:nous/welcome","ts":"2026-11-09T10:01:01Z"}',
+        '{"type":"activity","id":"S1","kind":"tool_call","text":"node --test","ts":"2026-11-09T10:01:05Z"}',
+        '{"type":"activity","id":"S1","kind":"tool_result","text":"noise","ts":"2026-11-09T10:01:06Z"}',
+        '{"type":"activity","id":"S1","kind":"file_change","text":"' + wt + 'lib/a.mjs","ts":"2026-11-09T10:01:07Z"}',
+    ]) + "\n")
+    activity = api.get_activity(NEW_RUN, memory_store)["activity"]
+    assert activity["agents"] == {"working": 1, "done": 0, "total": 1}
+    assert activity["plan_note"] == "Architect is validating the goal"
+    s1 = activity["stories"]["S1"]
+    assert s1["model"] == "openai:nous/welcome"
+    assert [step["kind"] for step in s1["steps"]] == ["start", "run", "file"]
+    assert s1["files"] == ["lib/a.mjs"]

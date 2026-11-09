@@ -277,6 +277,17 @@ The panel reads boards through the plugin's own read-only backend
 `GET /runs` returns `{"runs": [...]}` and `GET /runs/<run_id>` returns
 `{"board": ...}`. Both read the same plugin state that the tools write.
 
+## What the Desktop board shows
+
+Besides the kanban columns, the board shows how many agents are working, how
+many stories are done and how long the run has taken. While Baro is still
+planning, before any story exists, it shows what the planner is on. Each card
+shows its agent's model and latest step; click a card for that agent's steps
+(the commands it ran, what it said, the files it changed, its tests and the
+Critic's verdict). All of it is read from the run's mirrored event stream
+(`GET /api/plugins/baro/runs/<id>/activity`, core/activity.py) and never
+stored.
+
 ## Disclosures
 
 Read this before you install:
