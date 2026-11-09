@@ -25,6 +25,10 @@
 //   panel calls, under /api/plugins/baro/:
 //     GET /runs        -> { runs: [run_id, ...] }  (storage key `runs`, oldest first)
 //     GET /runs/<id>   -> { board: Board.to_dict() }  (storage key `run:<id>`)
+//     GET /runs/<id>/activity -> { activity }  (core/activity.py, never stored)
+//   It also adds a status-bar chip (STATUSBAR_AREAS.right) for the newest live
+//   run and a ⌘K command (PALETTE_AREA); both open the board with
+//   host.navigate. No pane: closing a plugin's only pane disables the plugin.
 //   Both are the RunRepository keys from core/store.py (ADR-006). The panel also
 //   accepts a bare list or a bare board dict. Per desktop-plugin-sdk.md:2200-2206,
 //   when the backend half is off `ctx.rest` returns errors and the panel shows
@@ -40,7 +44,7 @@
 // - Styling uses theme variables only (desktop-plugin-sdk.md:2116-2122).
 
 import * as React from 'react'
-import { ROUTES_AREA, SIDEBAR_NAV_AREA } from '@hermes/plugin-sdk'
+import { PALETTE_AREA, ROUTES_AREA, SIDEBAR_NAV_AREA, STATUSBAR_AREAS, host } from '@hermes/plugin-sdk'
 
 const h = React.createElement
 const { useState, useEffect, useCallback, useRef } = React
@@ -465,6 +469,68 @@ function BaroBoardPage({ ctx }) {
   )
 }
 
+// Bottom-bar chip: the newest run's agents at work, from any page. Hidden when
+// no run is live; a click opens the board.
+const STATUS_LIVE_MS = 4000
+const STATUS_IDLE_MS = 15000
+
+function BaroStatus({ ctx }) {
+  const [summary, setSummary] = useState(null)
+  const [live, setLive] = useState(false)
+  const read = useCallback(() => {
+    return ctx
+      .rest('/runs', { timeoutMs: REQUEST_TIMEOUT_MS })
+      .then(payload => {
+        const ids = normaliseRuns(payload)
+        if (ids.length === 0) return null
+        const id = encodeURIComponent(ids[ids.length - 1])
+        return Promise.all([
+          ctx.rest('/runs/' + id, { timeoutMs: REQUEST_TIMEOUT_MS }),
+          ctx.rest('/runs/' + id + '/activity', { timeoutMs: REQUEST_TIMEOUT_MS }).catch(() => null)
+        ])
+      })
+      .then(pair => {
+        const board = pair ? normaliseBoard(pair[0]) : null
+        const isLive = Boolean(board) && isLiveStatus(board.status)
+        setLive(isLive)
+        setSummary(isLive ? { board, activity: pair[1] && pair[1].activity } : null)
+      })
+      .catch(() => {
+        setLive(false)
+        setSummary(null)
+      })
+  }, [ctx])
+  useEffect(() => {
+    read()
+    return ctx.setInterval(read, live ? STATUS_LIVE_MS : STATUS_IDLE_MS)
+  }, [ctx, read, live])
+  if (!summary) return null
+  const agents = (summary.activity && summary.activity.agents) || {}
+  const stories = summary.board.stories || []
+  const done = stories.filter(s => s.state === 'done').length
+  const label =
+    stories.length === 0
+      ? 'Baro · planning'
+      : 'Baro · ' + (agents.working || 0) + ' working · ' + done + '/' + stories.length + ' done'
+  return h(
+    'button',
+    {
+      type: 'button',
+      onClick: () => host.navigate(ROUTE_PATH),
+      title: 'Open the Baro board',
+      style: {
+        background: 'transparent',
+        border: 'none',
+        cursor: 'pointer',
+        padding: '0 6px',
+        fontSize: '0.6875rem',
+        color: 'var(--ui-accent)'
+      }
+    },
+    label
+  )
+}
+
 export default {
   id: PLUGIN_ID,
   name: 'Baro',
@@ -480,6 +546,22 @@ export default {
         id: 'nav',
         area: SIDEBAR_NAV_AREA,
         data: { path: ROUTE_PATH, label: 'Baro', codicon: 'project' }
+      },
+      {
+        id: 'status',
+        area: STATUSBAR_AREAS.right,
+        order: 140,
+        render: () => h(BaroStatus, { ctx })
+      },
+      {
+        id: 'open',
+        area: PALETTE_AREA,
+        data: {
+          id: 'baro.open',
+          label: 'Baro: Open board',
+          keywords: ['baro', 'board', 'agents', 'kanban'],
+          run: () => host.navigate(ROUTE_PATH)
+        }
       }
     ])
   }

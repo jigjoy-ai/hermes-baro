@@ -288,6 +288,11 @@ Critic's verdict). All of it is read from the run's mirrored event stream
 (`GET /api/plugins/baro/runs/<id>/activity`, core/activity.py) and never
 stored.
 
+From any page, a chip in the status bar shows the newest live run ("Baro · 3
+working · 2/5 done", or "planning") and opens the board; ⌘K → "Baro: Open
+board" does the same. To watch a run beside the chat, open the board in a split
+next to the conversation.
+
 ## Disclosures
 
 Read this before you install:
