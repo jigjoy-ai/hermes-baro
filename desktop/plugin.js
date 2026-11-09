@@ -130,7 +130,7 @@ const styles = {
     fontSize: '0.8125rem',
     cursor: 'pointer'
   },
-  board: { display: 'flex', gap: '12px', flex: 1, minHeight: 0, overflowX: 'auto' },
+  board: { display: 'flex', gap: '12px', flex: 1, minHeight: 0, minWidth: 0, overflowX: 'auto' },
   column: {
     display: 'flex',
     flexDirection: 'column',
@@ -161,12 +161,12 @@ const styles = {
     color: 'var(--ui-text-secondary)'
   },
   chipLive: { border: '1px solid var(--ui-accent)', color: 'var(--ui-accent)' },
-  layout: { display: 'flex', gap: '12px', flex: 1, minHeight: 0 },
+  layout: { display: 'flex', gap: '12px', flex: 1, minHeight: 0, minWidth: 0 },
   panel: {
     display: 'flex',
     flexDirection: 'column',
     gap: '6px',
-    flex: '0 0 340px',
+    flex: '0 0 380px',
     border: '1px solid var(--ui-stroke-secondary)',
     borderRadius: '8px',
     padding: '10px',
@@ -197,15 +197,28 @@ function cardNote(text) {
   return sentence.length > CARD_NOTE_CHARS ? sentence.slice(0, CARD_NOTE_CHARS - 1).trimEnd() + '…' : sentence
 }
 
+const STATE_STRIPE = {
+  running: 'var(--ui-accent)',
+  done: 'var(--ui-text-tertiary)',
+  failed: 'var(--ui-text-danger, var(--ui-accent))',
+  ready: 'var(--ui-stroke-primary, var(--ui-stroke-secondary))',
+  blocked: 'var(--ui-stroke-secondary)'
+}
+
 const STEP_LABEL = { start: 'start', run: 'runs', say: 'says', file: 'file', test: 'test', verdict: 'critic', done: 'done', pause: 'waits', error: 'error' }
 
 function StoryCard({ story, agent, selected, onOpen }) {
+  const model = agent && agent.model ? agent.model.replace(/^[a-z]+:/, '') : null
   const children = [
     h('div', { key: 'title', style: styles.cardTitle }, story.title || story.id),
-    h('div', { key: 'id', style: styles.muted }, story.id + (agent && agent.model ? ' · ' + agent.model : '')),
-    h('div', { key: 'waits', style: styles.meta }, 'Waits on: ' + joinIds(story.waits_on)),
-    h('div', { key: 'blocks', style: styles.meta }, 'Blocks: ' + joinIds(story.blocks))
+    h('div', { key: 'id', style: styles.muted }, [story.id, model].filter(Boolean).join(' · '))
   ]
+  if (story.waits_on && story.waits_on.length) {
+    children.push(h('div', { key: 'waits', style: styles.meta }, 'Waits on ' + joinIds(story.waits_on)))
+  }
+  if (story.blocks && story.blocks.length && story.state !== 'done') {
+    children.push(h('div', { key: 'blocks', style: styles.muted }, 'Blocks ' + joinIds(story.blocks)))
+  }
   if (story.blocked_by_failure) {
     children.push(h('span', { key: 'bbf', style: styles.badge }, 'blocked by failure'))
   }
@@ -219,7 +232,12 @@ function StoryCard({ story, agent, selected, onOpen }) {
   } else if (story.last_progress) {
     children.push(h('div', { key: 'progress', style: styles.muted, title: story.last_progress }, cardNote(story.last_progress)))
   }
-  const style = Object.assign({}, styles.card, { cursor: 'pointer' }, selected ? { borderColor: 'var(--ui-accent)' } : null)
+  const style = Object.assign(
+    {},
+    styles.card,
+    { cursor: 'pointer', borderLeft: '3px solid ' + (STATE_STRIPE[story.state] || 'var(--ui-stroke-secondary)') },
+    selected ? { borderColor: 'var(--ui-accent)', borderLeftColor: 'var(--ui-accent)' } : null
+  )
   return h(
     'div',
     {
@@ -283,9 +301,12 @@ function AgentPanel({ story, agent, onClose }) {
 }
 
 function Column({ column, stories, agents, openId, onOpen }) {
+  // An empty column keeps its place but not its width, so a run's cards and
+  // the agent panel fit side by side.
+  const style = stories.length === 0 ? Object.assign({}, styles.column, { flex: '0 0 120px', minWidth: '120px' }) : styles.column
   return h(
     'div',
-    { style: styles.column, 'data-column': column.state },
+    { style, 'data-column': column.state },
     h('div', { style: styles.columnTitle }, column.title + ' (' + stories.length + ')'),
     stories.length === 0
       ? h('div', { style: styles.muted }, EMPTY)
