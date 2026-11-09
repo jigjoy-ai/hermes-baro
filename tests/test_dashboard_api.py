@@ -277,3 +277,23 @@ def test_activity_narrates_the_planning_phase(api, memory_store, tmp_path):
     activity = api.get_activity(NEW_RUN, memory_store)["activity"]
     assert [s["text"] for s in activity["plan_steps"]] == ["Sizing the goal", "Scout asked: Which module owns notes?"]
     assert activity["phase"]["index"] == 1
+
+
+def test_activity_shows_agents_talking_while_they_work(api, memory_store, tmp_path):
+    memory_store.data_dir = tmp_path
+    RunRepository(memory_store).save_board(
+        Board(run_id=NEW_RUN, goal="build it", repo="/tmp/repo", baro_version="0.130.0", status="running"))
+    events = tmp_path / "events" / f"{NEW_RUN}.jsonl"
+    events.parent.mkdir(parents=True)
+    events.write_text("\n".join([
+        '{"type":"story_start","id":"S1","title":"S1"}',
+        '{"type":"story_start","id":"S2","title":"S2"}',
+        '{"type":"story_log","id":"S1","line":"[peer/note] server.mjs uses 4-space indent and no semicolons"}',
+        '{"type":"replan","reason":"S3 needs S1","added":[],"rewired":[{"id":"S3","depends_on":["S1"]}]}',
+    ]) + "\n")
+    activity = api.get_activity(NEW_RUN, memory_store)["activity"]
+    note, replan = activity["team"]
+    assert (note["from"], note["to"], note["kind"]) == ("S1", ["S2"], "note")
+    assert replan["kind"] == "replan" and replan["text"] == "S3 needs S1"
+    assert activity["stories"]["S1"]["notes_sent"] == 1
+    assert activity["stories"]["S2"]["notes_received"] == 1

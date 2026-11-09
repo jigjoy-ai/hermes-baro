@@ -288,6 +288,14 @@ Critic's verdict). All of it is read from the run's mirrored event stream
 (`GET /api/plugins/baro/runs/<id>/activity`, core/activity.py) and never
 stored.
 
+A **Team** strip shows what the agents tell each other while they work: Baro
+runs them as concurrent participants on Mozaik, so a finding one agent
+publishes ("server.mjs uses 4-space indent, no semicolons") or a request for
+help reaches the others that are working at that moment, not when they next
+start. It also lists the plan changing under them (stories added or rewired)
+and a story pausing until the stories it needs are done. Cards count the notes
+each agent sent and received.
+
 From any page, a chip in the status bar shows the newest live run ("Baro · 3
 working · 2/5 done", or "planning") and opens the board; ⌘K → "Baro: Open
 board" does the same. To watch a run beside the chat, open the board in a split

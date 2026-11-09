@@ -205,7 +205,7 @@ const STATE_STRIPE = {
   blocked: 'var(--ui-stroke-secondary)'
 }
 
-const STEP_LABEL = { start: 'start', run: 'runs', say: 'says', file: 'file', test: 'test', verdict: 'critic', done: 'done', pause: 'waits', error: 'error' }
+const STEP_LABEL = { team: 'team', start: 'start', run: 'runs', say: 'says', file: 'file', test: 'test', verdict: 'critic', done: 'done', pause: 'waits', error: 'error' }
 
 function StoryCard({ story, agent, selected, onOpen }) {
   const model = agent && agent.model ? agent.model.replace(/^[a-z]+:/, '') : null
@@ -224,6 +224,11 @@ function StoryCard({ story, agent, selected, onOpen }) {
   }
   if (story.error) {
     children.push(h('div', { key: 'error', style: Object.assign({}, styles.error, styles.clamp), title: story.error }, story.error))
+  }
+  const sent = (agent && agent.notes_sent) || 0
+  const received = (agent && agent.notes_received) || 0
+  if (sent || received) {
+    children.push(h('div', { key: 'team', style: styles.muted }, '✉ ' + sent + ' sent · ' + received + ' received'))
   }
   const step = agent && agent.last_step
   if (step) {
@@ -315,6 +320,38 @@ function PlanningView({ board, activity }) {
       )
   }
   return h('div', { style: Object.assign({}, styles.panel, { flex: 1 }) }, rows)
+}
+
+// What the agents told each other while they worked (Mozaik coordination),
+// plus the plan changing under them. Newest first.
+const TEAM_PREVIEW = 4
+
+function TeamFeed({ activity }) {
+  const [open, setOpen] = useState(false)
+  const team = (activity && activity.team) || []
+  if (team.length === 0) return null
+  const shown = team.slice().reverse().slice(0, open ? team.length : TEAM_PREVIEW)
+  const rows = shown.map((m, i) => {
+    const who = m.from === 'plan' ? 'Plan' : m.from
+    const to = m.to && m.to.length ? ' → ' + m.to.join(', ') : ''
+    const text = m.label + (m.text ? ': ' + m.text : '')
+    return h(
+      'div',
+      { key: 'm' + i, style: styles.step, title: text },
+      h('span', { style: Object.assign({}, styles.stepKind, { flex: '0 0 92px', textTransform: 'none' }) }, who + to),
+      h('span', { style: Object.assign({}, styles.stepText, styles.clamp) }, text)
+    )
+  })
+  return h(
+    'div',
+    { style: Object.assign({}, styles.panel, { flex: '0 0 auto', maxHeight: open ? '40%' : 'none' }) },
+    h('div', { style: styles.header },
+      h('span', { style: styles.columnTitle }, 'Team · agents talking while they work (' + team.length + ')'),
+      team.length > TEAM_PREVIEW
+        ? h('button', { type: 'button', style: styles.button, onClick: () => setOpen(!open) }, open ? 'Less' : 'All')
+        : null),
+    rows
+  )
 }
 
 // Everything one agent did, newest last.
@@ -530,6 +567,7 @@ function BaroBoardPage({ ctx }) {
     { style: styles.page },
     h(BoardHeader, { board, runs, selected, onSelect, onRefresh, error }),
     h(ActivityBar, { board, activity }),
+    h(TeamFeed, { activity }),
     body
   )
 }

@@ -33,6 +33,10 @@ _STEP_KINDS = {
 # .../baro-worktrees/<run>/<story>/<repo>/path -> path
 _WORKTREE_PATH = re.compile(r"\S*/baro-worktrees/[^/\s]+/[^/\s]+/[^/\s]+/")
 _LEASE = re.compile(r"lease granted to \S+ → (\S+)")
+# Baro forwards Mozaik coordination to the story's log lane (execution/forwarders/coordination.ts).
+_PEER = re.compile(r"^\[peer/(note|help|discovered)\] (.*)$", re.S)
+_PEER_LABEL = {"note": "told the team", "help": "asked for help", "discovered": "found follow-up work"}
+MAX_TEAM = 40
 
 
 def _short(text: str) -> str:
@@ -101,6 +105,7 @@ def summarize(text: str) -> dict:
     stories: dict[str, dict] = {}
     plan_note = None
     plan_steps: list[dict] = []
+    team: list[dict] = []
     phase = 0
     first = last = None
     for raw in text.splitlines():
@@ -134,6 +139,16 @@ def summarize(text: str) -> dict:
             plan_steps.append({"at": at, "text": "Architect done: design decisions written; planning the stories"})
         elif kind == "init" and isinstance(event.get("stories"), list) and event["stories"]:
             plan_steps.append({"at": at, "text": f"Plan ready: {len(event['stories'])} stories"})
+        if kind == "replan" and stories:
+            added = [str(x.get("id")) for x in event.get("added") or [] if isinstance(x, dict)]
+            rewired = [str(x.get("id")) for x in event.get("rewired") or [] if isinstance(x, dict)]
+            what = ", ".join(filter(None, [
+                f"added {', '.join(added)}" if added else "",
+                f"rewired {', '.join(rewired)}" if rewired else "",
+            ]))
+            team.append({"at": at, "from": "plan", "to": [], "kind": "replan",
+                         "label": "the plan changed while the agents worked",
+                         "text": _short(what if str(event.get("reason") or "").startswith("progressive planner") or not event.get("reason") else str(event.get("reason")))})
         if not story_lane:
             continue
         story = _story(stories, sid)
@@ -152,6 +167,9 @@ def summarize(text: str) -> dict:
             paused = error.startswith("suspended on dependency block")
             story["status"] = "waiting" if paused else "failed"
             story["ended_at"] = at
+            if paused:
+                team.append({"at": at, "from": sid, "to": [], "kind": "blocked",
+                             "label": "paused until the stories it needs are done", "text": ""})
             _step(story, at, "pause" if paused else "error",
                   "waiting for the stories it depends on" if paused else error)
         elif kind == "routed":
@@ -159,9 +177,22 @@ def summarize(text: str) -> dict:
             if model:
                 story["model"] = f"{backend}:{model}" if backend else str(model)
         elif kind == "story_log":
-            lease = _LEASE.search(str(event.get("line", "")))
+            line = str(event.get("line", ""))
+            lease = _LEASE.search(line)
             if lease:
                 story["model"] = lease.group(1)
+            peer = _PEER.match(line)
+            if peer:
+                peer_kind, body = peer.groups()
+                # Delivered live to every other agent at work at that moment.
+                to = [other for other, s in stories.items() if other != sid and s["status"] == "working"]
+                team.append({"at": at, "from": sid, "to": to, "kind": peer_kind,
+                             "label": _PEER_LABEL[peer_kind], "text": _short(body)})
+                del team[:-MAX_TEAM]
+                story["notes_sent"] = story.get("notes_sent", 0) + 1
+                for other in to:
+                    stories[other]["notes_received"] = stories[other].get("notes_received", 0) + 1
+                _step(story, at, "team", f"{_PEER_LABEL[peer_kind]}: {body}")
         elif kind == "activity":
             label = _STEP_KINDS.get(str(event.get("kind")))
             if label:
@@ -183,6 +214,7 @@ def summarize(text: str) -> dict:
         "agents": {"working": working, "done": done, "total": len(stories)},
         "plan_note": plan_note,
         "plan_steps": plan_steps,
+        "team": team,
         "phase": {"index": phase, "names": list(_PHASES)},
         "elapsed_secs": int((last - first).total_seconds()) if first and last else 0,
         "stories": stories,
