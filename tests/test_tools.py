@@ -48,10 +48,10 @@ def test_build_command_plan_only_turns_off_progressive_planning():
 
 def test_build_command_pinned_version_is_exact_semver():
     # packages/baro-app/package.json:3 in the Baro checkout.
-    assert BARO_VERSION == "0.130.0"
+    assert BARO_VERSION == "0.131.0"
     assert re.fullmatch(r"\d+\.\d+\.\d+", BARO_VERSION)
     assert BARO_SPEC == f"{BARO_PACKAGE}@{BARO_VERSION}"
-    assert BARO_PACKAGE + "@" + BARO_VERSION == "baro-ai@0.130.0"
+    assert BARO_PACKAGE + "@" + BARO_VERSION == "baro-ai@0.131.0"
 
 
 def test_build_command_pinned_launcher_is_the_npm_package_runner():

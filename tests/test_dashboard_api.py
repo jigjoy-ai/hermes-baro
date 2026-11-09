@@ -86,7 +86,7 @@ def populated_store(memory_store, load_fixture):
     """Two runs saved through RunRepository, the writer bridge.py uses."""
     repo = RunRepository(memory_store)
     for run_id in (OLD_RUN, NEW_RUN):
-        board = Board(run_id=run_id, goal="build it", repo="/tmp/repo", baro_version="0.130.0")
+        board = Board(run_id=run_id, goal="build it", repo="/tmp/repo", baro_version="0.131.0")
         for line in load_fixture("run_failure_blocks_dependents.jsonl"):
             board.apply_line(line, at="2026-11-05T14:22:33Z")
         repo.save_board(board)
@@ -227,7 +227,7 @@ def test_routes_over_http_when_fastapi_is_installed(api, populated_store):
 def test_get_run_replays_the_mirrored_events_while_the_run_is_live(api, memory_store, tmp_path):
     # The board must move while Baro works, not only when the model calls baro_status.
     memory_store.data_dir = tmp_path
-    board = Board(run_id=NEW_RUN, goal="build it", repo="/tmp/repo", baro_version="0.130.0", status="running")
+    board = Board(run_id=NEW_RUN, goal="build it", repo="/tmp/repo", baro_version="0.131.0", status="running")
     RunRepository(memory_store).save_board(board)
     events = tmp_path / "events" / f"{NEW_RUN}.jsonl"
     events.parent.mkdir(parents=True)
@@ -242,7 +242,7 @@ def test_get_run_replays_the_mirrored_events_while_the_run_is_live(api, memory_s
 def test_activity_says_what_each_agent_is_doing(api, memory_store, tmp_path):
     memory_store.data_dir = tmp_path
     RunRepository(memory_store).save_board(
-        Board(run_id=NEW_RUN, goal="build it", repo="/tmp/repo", baro_version="0.130.0", status="running"))
+        Board(run_id=NEW_RUN, goal="build it", repo="/tmp/repo", baro_version="0.131.0", status="running"))
     events = tmp_path / "events" / f"{NEW_RUN}.jsonl"
     events.parent.mkdir(parents=True)
     wt = "/private/var/folders/x/T/baro-worktrees/run-1/S1/repo/"
@@ -266,7 +266,7 @@ def test_activity_says_what_each_agent_is_doing(api, memory_store, tmp_path):
 def test_activity_narrates_the_planning_phase(api, memory_store, tmp_path):
     memory_store.data_dir = tmp_path
     RunRepository(memory_store).save_board(
-        Board(run_id=NEW_RUN, goal="build it", repo="/tmp/repo", baro_version="0.130.0", status="running"))
+        Board(run_id=NEW_RUN, goal="build it", repo="/tmp/repo", baro_version="0.131.0", status="running"))
     events = tmp_path / "events" / f"{NEW_RUN}.jsonl"
     events.parent.mkdir(parents=True)
     events.write_text("\n".join([
@@ -282,7 +282,7 @@ def test_activity_narrates_the_planning_phase(api, memory_store, tmp_path):
 def test_activity_shows_agents_talking_while_they_work(api, memory_store, tmp_path):
     memory_store.data_dir = tmp_path
     RunRepository(memory_store).save_board(
-        Board(run_id=NEW_RUN, goal="build it", repo="/tmp/repo", baro_version="0.130.0", status="running"))
+        Board(run_id=NEW_RUN, goal="build it", repo="/tmp/repo", baro_version="0.131.0", status="running"))
     events = tmp_path / "events" / f"{NEW_RUN}.jsonl"
     events.parent.mkdir(parents=True)
     events.write_text("\n".join([

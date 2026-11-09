@@ -3,7 +3,7 @@
 Sources, all in the Baro repository (paths relative to its root):
 
 - Version pin: packages/baro-app/package.json:2-3 publishes the CLI package
-  with ``"version": "0.130.0"`` (crates/baro-tui/Cargo.toml:3 carries the same
+  with ``"version": "0.131.0"`` (crates/baro-tui/Cargo.toml:3 carries the same
   version for the Rust host). Its ``bin`` entry ``baro`` at
   packages/baro-app/package.json:6-8 is what ``npx`` runs. That launcher
   forwards argv unchanged to the native binary
@@ -37,7 +37,7 @@ import re
 import shlex
 
 # packages/baro-app/package.json:3 (exact version, no range).
-BARO_VERSION = "0.130.0"
+BARO_VERSION = "0.131.0"
 # The single pinned npm spec. BARO_PACKAGE is derived from it, so no unpinned
 # package literal exists anywhere in the plugin.
 BARO_SPEC = "baro-ai@" + BARO_VERSION
