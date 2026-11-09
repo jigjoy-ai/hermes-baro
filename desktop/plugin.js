@@ -202,7 +202,7 @@ const STEP_LABEL = { start: 'start', run: 'runs', say: 'says', file: 'file', tes
 function StoryCard({ story, agent, selected, onOpen }) {
   const children = [
     h('div', { key: 'title', style: styles.cardTitle }, story.title || story.id),
-    h('div', { key: 'id', style: styles.muted }, story.id + (agent && agent.model ? ' · ' + agent.model : ''))
+    h('div', { key: 'id', style: styles.muted }, story.id + (agent && agent.model ? ' · ' + agent.model : '')),
     h('div', { key: 'waits', style: styles.meta }, 'Waits on: ' + joinIds(story.waits_on)),
     h('div', { key: 'blocks', style: styles.meta }, 'Blocks: ' + joinIds(story.blocks))
   ]
