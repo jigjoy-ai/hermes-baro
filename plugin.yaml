@@ -12,7 +12,7 @@
 # every baro_run and baro_plan call to Hermes's human-approval gate (core/consent.py).
 # There are no commands or privileged host capabilities (index.md:384-412).
 name: baro
-version: 0.1.0
+version: 0.1.1
 description: >-
   Hand a software goal to Baro and watch it run as a live, dependency-aware
   kanban. Provides baro_plan, baro_run, baro_status and baro_cancel, plus a
@@ -35,7 +35,7 @@ config_schema:
     type: bool
     default: false
     label: "Use my Hermes subscription"
-    description: "Run Baro's agents on your Hermes subscription through the local proxy (start it with `hermes proxy start`). A backend named in the request still wins."
+    description: "Run Baro's agents on your Hermes subscription through the local proxy (start it with `hermes proxy start`). This setting is the only way the plugin picks a backend: a tool call cannot name one."
   hermes_subscription_model:
     type: str
     default: "nous/welcome"
@@ -45,4 +45,4 @@ config_schema:
     type: str
     default: "http://127.0.0.1:8645/v1"
     label: "Proxy URL"
-    description: "Where `hermes proxy start` listens."
+    description: "Where `hermes proxy start` listens. Must be on this machine (localhost, 127.0.0.1 or ::1)."

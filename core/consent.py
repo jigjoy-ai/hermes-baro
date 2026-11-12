@@ -26,19 +26,23 @@ RULE_KEY = "baro:launch"
 _GOAL_PREVIEW = 200
 
 
-def launch_approval(tool_name: str, args: Any) -> dict | None:
-    """The ``pre_tool_call`` directive for ``tool_name``, or None for other tools."""
+def launch_approval(tool_name: str, args: Any, backend: dict | None = None) -> dict | None:
+    """The ``pre_tool_call`` directive for ``tool_name``, or None for other tools.
+
+    ``backend`` is what the plugin's settings name (core/settings.py
+    ``backend_from_settings``), or None when they name none.
+    """
     if tool_name not in LAUNCH_TOOLS:
         return None
     args = args if isinstance(args, dict) else {}
     return {
         "action": "approve",
-        "message": approval_message(tool_name, args.get("goal"), args.get("repo")),
+        "message": approval_message(tool_name, args.get("goal"), args.get("repo"), backend),
         "rule_key": RULE_KEY,
     }
 
 
-def approval_message(tool_name: str, goal: Any, repo: Any) -> str:
+def approval_message(tool_name: str, goal: Any, repo: Any, backend: dict | None = None) -> str:
     repo_text = repo if isinstance(repo, str) and repo.strip() else "the repository you named"
     goal_text = _preview(goal)
     if tool_name == "baro_plan":
@@ -59,9 +63,23 @@ def approval_message(tool_name: str, goal: Any, repo: Any) -> str:
             "Each agent works in its own git worktree of that repository and its shell "
             "commands are confined to it; Baro integrates the work on a local branch and "
             "does not push or open pull requests (--local-only).",
-            "Model calls go to the backend Baro is configured with.",
+            _destination(backend),
             "Approve only if you would let a developer run commands in this repository.",
         ]
+    )
+
+
+def _destination(backend: dict | None) -> str:
+    """Where the run's model calls go. A tool call cannot choose it (tools.py), so this is the whole answer."""
+    if not backend:
+        return (
+            "Model calls go to the backend Baro is configured with on this machine; "
+            "this request cannot change that."
+        )
+    return (
+        f"Model calls go to the Hermes subscription proxy on this machine "
+        f"({backend.get('openai_base_url')}, model {backend.get('model')}), as set in this "
+        "plugin's settings; this request cannot change that."
     )
 
 

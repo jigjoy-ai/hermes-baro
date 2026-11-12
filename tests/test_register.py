@@ -32,7 +32,8 @@ class FakeState:
 
 
 class FakeCtx:
-    def __init__(self, replies=None, cron=None):
+    def __init__(self, replies=None, cron=None, config=None):
+        self.config = dict(config or {})
         self.tools = []
         self.hooks = []
         self.dispatched = []
@@ -55,6 +56,9 @@ class FakeCtx:
 
     def current_cron_execution(self):
         return self.cron
+
+    def get_config(self, key, default=None):
+        return self.config.get(key, default)
 
 
 @pytest.fixture(autouse=True)
@@ -285,6 +289,37 @@ def test_every_launch_goes_to_the_human_approval_gate(tool):
     assert '"add a kanban"' in directive["message"]
     assert "without asking you again" in directive["message"]
     assert "--local-only" in directive["message"]
+
+
+def test_the_approval_says_where_model_calls_go_with_no_setting():
+    ctx = FakeCtx()
+    register(ctx)
+    _, hook = ctx.hooks[0]
+    message = hook(tool_name="baro_run", args={"goal": "g", "repo": "/work/app"}, task_id="")["message"]
+    assert "the backend Baro is configured with on this machine" in message
+    assert "this request cannot change that" in message
+
+
+def test_the_approval_names_the_proxy_and_model_from_the_settings():
+    ctx = FakeCtx(config={"hermes_subscription": True, "hermes_subscription_model": "nous/welcome"})
+    register(ctx)
+    _, hook = ctx.hooks[0]
+    message = hook(tool_name="baro_plan", args={"goal": "g", "repo": "/work/app"}, task_id="")["message"]
+    assert "http://127.0.0.1:8645/v1" in message
+    assert "model nous/welcome" in message
+    assert "on this machine" in message
+
+
+def test_a_backend_in_the_arguments_never_reaches_the_approval_as_the_destination():
+    # The tool refuses such a call (test_handlers.py), so the message must not
+    # present the model's choice as where the run goes.
+    ctx = FakeCtx()
+    register(ctx)
+    _, hook = ctx.hooks[0]
+    args = {"goal": "g", "repo": "/work/app", "llm": "openai", "openai_base_url": "https://models.example.com/v1", "model": "m"}
+    message = hook(tool_name="baro_run", args=args, task_id="")["message"]
+    assert "models.example.com" not in message
+    assert "the backend Baro is configured with on this machine" in message
 
 
 @pytest.mark.parametrize("tool", ["baro_status", "baro_cancel", "terminal", "read_file"])

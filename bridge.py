@@ -45,9 +45,9 @@ import urllib.error
 import urllib.request
 from typing import Any, Callable
 
-from .core.consent import launch_approval
+from .core.consent import LAUNCH_TOOLS, launch_approval
 from .core.events_file import events_path
-from .core.settings import SETTING_DEFAULTS
+from .core.settings import SETTING_DEFAULTS, backend_from_settings
 from .tools import DISPATCH_FAILED, HANDLERS, TOOL_SCHEMAS, ApprovalDenied, DispatchError, error
 
 TOOLSET = "baro"
@@ -147,13 +147,7 @@ class HermesBridge:
 
     def settings(self) -> dict:
         """This plugin's settings (``plugins.entries.baro.settings``, plugin.yaml config_schema)."""
-        values = {}
-        for key, default in SETTING_DEFAULTS.items():
-            try:
-                values[key] = self._ctx.get_config(key, default=default)
-            except Exception:  # an older Hermes without plugin settings
-                values[key] = default
-        return values
+        return _read_settings(self._ctx)
 
     def events_file(self, run_id: str) -> str | None:
         """Where ``baro_run`` mirrors Baro's events for the board (core/events_file.py)."""
@@ -347,9 +341,34 @@ def _tool_handler(name: str, bridge: Callable[[], HermesBridge]) -> Callable[...
     return handler
 
 
-def _launch_approval_hook(tool_name: str = "", args: Any = None, task_id: str = "", **kwargs: Any) -> dict | None:
-    """``pre_tool_call``: send every Baro launch to Hermes's human-approval gate (core/consent.py)."""
-    return launch_approval(tool_name, args)
+def _read_settings(ctx: Any) -> dict:
+    values = {}
+    for key, default in SETTING_DEFAULTS.items():
+        try:
+            values[key] = ctx.get_config(key, default=default)
+        except Exception:  # an older Hermes without plugin settings
+            values[key] = default
+    return values
+
+
+def _launch_approval_hook(ctx: Any):
+    """``pre_tool_call``: send every Baro launch to Hermes's human-approval gate (core/consent.py).
+
+    The message names where the run's model calls go. That comes from the same
+    settings the tool reads (tools.py), never from the call's arguments.
+    """
+
+    def hook(tool_name: str = "", args: Any = None, task_id: str = "", **kwargs: Any) -> dict | None:
+        if tool_name not in LAUNCH_TOOLS:
+            return None
+        try:
+            backend = backend_from_settings(_read_settings(ctx))
+        except ValueError:
+            # The tool refuses to start with these settings (tools.py), so nothing is sent anywhere.
+            backend = None
+        return launch_approval(tool_name, args, backend)
+
+    return hook
 
 
 def register(ctx: Any) -> None:
@@ -375,4 +394,4 @@ def register(ctx: Any) -> None:
             schema=TOOL_SCHEMAS[name],
             handler=_tool_handler(name, bridge),
         )
-    ctx.register_hook("pre_tool_call", _launch_approval_hook)
+    ctx.register_hook("pre_tool_call", _launch_approval_hook(ctx))

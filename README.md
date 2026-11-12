@@ -68,7 +68,10 @@ approve it on repositories and machines where that is acceptable.
 Because Baro does not ask per command, the plugin asks you once, up front, for
 the whole run. Its `pre_tool_call` hook sends every `baro_run` and `baro_plan`
 call to Hermes's human-approval gate, whatever approval mode you use (`smart`
-included), with a message that says what the run will do. If you deny, the
+included), with a message that says what the run will do and where its model
+calls go: the Hermes subscription proxy on this machine with its URL and model
+when that setting is on, otherwise the backend Baro is configured with. A tool
+call cannot change that destination. If you deny, the
 approval times out or the gate fails, nothing starts. Cron and unattended
 sessions are denied by Hermes's own defaults, and the plugin refuses them itself
 (see [Unattended contexts](#unattended-contexts)). The plugin never approves on
@@ -126,9 +129,12 @@ the plan appears on the Baro board.
 | --- | --- | --- |
 | `goal` | string, required | Plain-language goal. Up to 4000 characters, no NUL, must not start with `-`. |
 | `repo` | string, required | Absolute path of an existing directory. |
-| `llm` | string, optional | Passed to Baro as `--llm`. Omit to use Baro's configured backend. |
-| `openai_base_url` | string, optional | Passed to Baro as `--openai-base-url`. |
-| `model` | string, optional | Passed to Baro as `--model`. |
+
+The tools take no backend, base URL or model. Those decide which host receives
+the repository's code, so they are read only from the plugin's settings (see
+[Using the Hermes subscription proxy](#using-the-hermes-subscription-proxy)) or
+left to Baro's own configuration. A call that carries `llm`, `openai_base_url`
+or `model` is refused with `invalid_argument`.
 
 Result:
 
@@ -182,7 +188,8 @@ Result:
 ```
 
 The command always has this shape. `--llm`, `--openai-base-url` and `--model`
-are added only when you pass them. Every value is shell-quoted.
+are added only when the subscription setting is on, with the values from the
+plugin's settings. Every value is shell-quoted.
 
 ### `baro_status`
 
@@ -312,8 +319,9 @@ Read this before you install:
   [Autonomous by design, guarded by the harness](#autonomous-by-design-guarded-by-the-harness).
   The plugin never approves on your behalf and never turns a guard off.
 - **Network calls to configured model providers.** Baro calls the model provider
-  you configured for it (or the one you name with `llm` and `openai_base_url`,
-  or the Hermes subscription proxy when that setting is on). `npx` also
+  you configured for it, or the Hermes subscription proxy on this machine when
+  that setting is on. A tool call cannot name another host, and the approval
+  message says which of the two a run uses. `npx` also
   downloads the pinned Baro package from the npm registry on first use. The
   plugin itself makes one other kind of call: before it starts Baro against a
   base URL on this machine, it requests `<base URL>/models` there to check that
@@ -343,34 +351,26 @@ hermes proxy start
 
 Then turn on **Settings → Plugins → Baro → Use my Hermes subscription** and pick
 the model your tier serves (`nous/welcome` by default). Every `baro_run` and
-`baro_plan` without a backend of its own then runs Baro on the proxy, so a
+`baro_plan` then runs Baro on the proxy, so a
 request can be as plain as "use Baro to add a CLI to my notes API". If nothing
 answers at the proxy URL, the tool says to start the proxy instead of starting
 Baro.
 
-The same works per request, setting or not, with three tool arguments:
+The plugin then starts Baro with `--llm openai --openai-base-url <Proxy URL>
+--model <Subscription model>`. Use a model that your Portal tier serves, as
+listed by the proxy's `/v1/models` route. The Proxy URL has to be on this
+machine (`localhost`, `127.0.0.1`, `::1`); the plugin refuses any other. The
+proxy ignores the API key that the client sends and attaches your real
+credential itself, so Baro needs no `OPENAI_API_KEY` for it: for a base URL on
+this machine Baro sends a placeholder, and any key you have set stays unused.
 
-```json
-{
-  "goal": "Add rate limiting to the API",
-  "repo": "/abs/path/to/repo",
-  "llm": "openai",
-  "openai_base_url": "http://127.0.0.1:8645/v1",
-  "model": "<portal model>"
-}
-```
+These settings are the only way the plugin picks a backend. There are no tool
+arguments for it, so nothing in a conversation or in a repository can point a
+run at another host. To use a different provider, configure Baro itself.
 
-Baro then runs with `--llm openai --openai-base-url http://127.0.0.1:8645/v1
---model <portal model>`. Use a model that your Portal tier serves, as listed by
-the proxy's `/v1/models` route. The proxy ignores the API key that the client
-sends and attaches your real credential itself, so Baro needs no
-`OPENAI_API_KEY` for it: for a base URL on this machine (`localhost`,
-`127.0.0.1`, `::1`) Baro sends a placeholder, and any key you have set stays
-unused.
-
-`model` names every Baro phase, the Critic and the Surgeon included. Tested
-with Baro 0.130.0 on the free `nous/welcome` tier, with no OpenAI key in the
-environment: a small goal ran through planning, its stories, the Critic's
+The Subscription model names every Baro phase, the Critic and the Surgeon
+included. Tested with Baro 0.130.0 on the free `nous/welcome` tier, with no
+OpenAI key in the environment: a small goal ran through planning, its stories, the Critic's
 reviews and the final test run.
 
 ## Pinned Baro version
@@ -435,7 +435,7 @@ Output with Hermes Agent v0.22.7:
 ✓ manifest — plugin.yaml parses
 ✓ manifest fields — name, version, description present
 ✓ requires_hermes — spec '>=0.22.7' parses
-✓ config schema — not declared
+✓ config schema — shape valid
 ✓ requires_env — all entries UPPER_SNAKE
 ✓ oauth — not declared
 ✓ loadable — entry: __init__.py, desktop/plugin.js

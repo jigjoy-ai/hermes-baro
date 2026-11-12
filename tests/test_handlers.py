@@ -258,11 +258,31 @@ def test_run_starts_background_and_returns_id(repo):
     assert bridge.memory.get("runs") == [run_id]
 
 
-def test_run_passes_optional_flags(repo):
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"llm": "openai"},
+        {"openai_base_url": "https://models.example.com/v1"},
+        {"model": "gpt-x"},
+        {"llm": "openai", "openai_base_url": "http://localhost:1/v1", "model": "m"},
+    ],
+)
+@pytest.mark.parametrize("handler", [tools.handle_baro_run, tools.handle_baro_plan])
+def test_a_call_cannot_name_the_backend(handler, extra, repo):
+    # The backend decides which host gets the repository's code. A model that
+    # could name it could send that code to a host nobody approved.
     bridge = FakeBridge()
-    extra = {"llm": "openai", "openai_base_url": "http://localhost:1/v1", "model": "m"}
-    result = tools.handle_baro_run(bridge, goal_args(repo, **extra))
-    assert result["command"] == build_command("Add a health endpoint", repo, **extra)
+    result = handler(bridge, goal_args(repo, **extra))
+    assert result["ok"] is False
+    assert result["error"] == "invalid_argument"
+    for name in extra:
+        assert name in result["message"]
+    assert bridge.calls_named("start_background") == []
+
+
+@pytest.mark.parametrize("name", ["baro_run", "baro_plan"])
+def test_the_launch_tools_take_only_a_goal_and_a_repository(name):
+    assert sorted(tools.TOOL_SCHEMAS[name]["parameters"]["properties"]) == ["goal", "repo"]
 
 
 def test_run_build_command_pinned(repo):
@@ -523,13 +543,11 @@ def test_hermes_url_references_are_unwrapped_before_baro_sees_them():
 
 
 def test_run_command_carries_the_bare_base_url(tmp_path):
+    bridge = FakeBridge(settings={"hermes_subscription": True, "hermes_proxy_url": "@url:`http://127.0.0.1:8645/v1`"})
     values, err = tools._goal_args({
         "goal": "Use NOTES_URL, default @url:`http://localhost:3000`",
         "repo": str(tmp_path),
-        "llm": "openai",
-        "openai_base_url": "@url:`http://127.0.0.1:8645/v1`",
-        "model": "nous/welcome",
-    })
+    }, bridge)
     assert err is None
     command = tools._command(values)
     assert "--openai-base-url http://127.0.0.1:8645/v1" in command
@@ -564,11 +582,21 @@ def test_subscription_setting_supplies_the_proxy_backend(repo):
     assert bridge.probed == ["http://127.0.0.1:8645/v1"]
 
 
-def test_backend_named_in_the_call_wins_over_the_setting(repo):
+def test_a_call_cannot_override_the_setting_either(repo):
     bridge = FakeBridge(settings={"hermes_subscription": True})
     result = tools.handle_baro_run(bridge, {"goal": "Add a health endpoint", "repo": repo, "llm": "claude"})
-    assert "--llm claude" in result["command"]
-    assert "--openai-base-url" not in result["command"]
+    assert result["error"] == "invalid_argument"
+    assert bridge.calls_named("start_background") == []
+
+
+@pytest.mark.parametrize("url", ["https://models.example.com/v1", "http://10.0.0.5:8645/v1", "not a url"])
+def test_a_proxy_url_off_this_machine_starts_nothing(url, repo):
+    bridge = FakeBridge(settings={"hermes_subscription": True, "hermes_proxy_url": url})
+    result = tools.handle_baro_run(bridge, {"goal": "Add a health endpoint", "repo": repo})
+    assert result["error"] == "dispatch_failed"
+    assert "Settings" in result["message"]
+    assert bridge.probed == []
+    assert bridge.calls_named("start_background") == []
 
 
 def test_setting_off_picks_no_backend(repo):

@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .core.board import TERMINAL_STATUSES, Board
-from .core.settings import is_local_url, subscription_backend
+from .core.settings import backend_from_settings, is_local_url
 from .core.command import (
     BARO_VERSION,
     PLAN_ONLY_FLAG,
@@ -66,7 +66,6 @@ ERROR_CODES = (
 # "Result unavailable" while Baro keeps planning.
 PLAN_TIMEOUT_SECS = 360.0
 PLAN_POLL_SECS = 0.5
-MAX_OPTION_CHARS = 2000
 
 # Injectable clock and sleep. Tests monkeypatch these module attributes.
 _monotonic = time.monotonic
@@ -140,19 +139,14 @@ _GOAL_REPO_PROPS = {
         "type": "string",
         "description": "Absolute path of an existing directory: the repository Baro works in.",
     },
-    "llm": {
-        "type": "string",
-        "description": "Optional Baro --llm backend (e.g. 'openai'). Omit to use Baro's configured backend.",
-    },
-    "openai_base_url": {
-        "type": "string",
-        "description": "Optional Baro --openai-base-url for an OpenAI-compatible endpoint.",
-    },
-    "model": {
-        "type": "string",
-        "description": "Optional Baro --model name.",
-    },
 }
+
+# Not tool arguments on purpose. They decide which host receives the repository's
+# code and the goal, and the person approving a run sees only what the approval
+# message says: a model that could name them could send both to a host nobody
+# approved. They come from the plugin's settings (core/settings.py) or from
+# Baro's own configuration, and a call that carries one is refused.
+_BACKEND_ARGS = ("llm", "openai_base_url", "model")
 
 _RUN_ID_PROPS = {
     "run_id": {
@@ -226,8 +220,8 @@ TOOL_SCHEMAS: dict[str, dict] = {
 def _goal_args(args: Any, bridge: Any = None) -> tuple[dict | None, dict | None]:
     """Return (validated values, None) or (None, error).
 
-    With no backend in the arguments, the subscription setting (core/settings.py)
-    may supply one; a backend named in the call always wins.
+    The backend is never read from the call (see _BACKEND_ARGS). The plugin's
+    settings may name one (core/settings.py); otherwise Baro uses its own.
     """
     if not isinstance(args, dict):
         return None, error(INVALID_ARGUMENT, "arguments must be an object")
@@ -238,33 +232,23 @@ def _goal_args(args: Any, bridge: Any = None) -> tuple[dict | None, dict | None]
         validate_args(goal, repo)
     except ValueError as exc:
         return None, error(INVALID_ARGUMENT, str(exc))
-    values = {"goal": goal, "repo": repo}
-    for name in ("llm", "openai_base_url", "model"):
-        value = args.get(name)
-        if value is None or value == "":
-            values[name] = None
-            continue
-        if not isinstance(value, str):
-            return None, error(INVALID_ARGUMENT, f"{name} must be a string")
-        if "\x00" in value or len(value) > MAX_OPTION_CHARS:
-            return None, error(
-                INVALID_ARGUMENT,
-                f"{name} must have no NUL and at most {MAX_OPTION_CHARS} characters",
-            )
-        value = unwrap_references(value)
-        if name == "openai_base_url":
-            try:
-                value = normalize_base_url(value)
-            except ValueError as exc:
-                return None, error(INVALID_ARGUMENT, str(exc))
-        if value.startswith("-"):
-            return None, error(INVALID_ARGUMENT, f"{name} must not start with '-'")
-        values[name] = value
-    if bridge is not None and not any(values[n] for n in ("llm", "openai_base_url", "model")):
-        settings_of = getattr(bridge, "settings", None)
-        implied = subscription_backend(settings_of()) if callable(settings_of) else None
-        if implied:
-            values.update(implied)
+    named = [name for name in _BACKEND_ARGS if args.get(name) not in (None, "")]
+    if named:
+        return None, error(
+            INVALID_ARGUMENT,
+            f"{', '.join(named)} cannot be set in a call. The backend Baro uses is chosen in this "
+            "plugin's settings (Settings → Plugins → Baro) or in Baro's own configuration; "
+            "call again with only goal and repo.",
+        )
+    values = {"goal": goal, "repo": repo, "llm": None, "openai_base_url": None, "model": None}
+    settings_of = getattr(bridge, "settings", None)
+    if callable(settings_of):
+        try:
+            backend = backend_from_settings(settings_of())
+        except ValueError as exc:
+            return None, error(DISPATCH_FAILED, f"Baro was not started: {exc}. Fix it in Settings → Plugins → Baro.")
+        if backend:
+            values.update(backend)
     url = values["openai_base_url"]
     probe = getattr(bridge, "endpoint_reachable", None)
     if url and is_local_url(url) and callable(probe) and not probe(url):
